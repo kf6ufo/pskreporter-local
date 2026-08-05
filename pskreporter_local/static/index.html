@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>PSK Reporter Local</title>
+    <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/assets/styles.css">
+    <script src="/assets/app.js?v=0.3.0" defer></script>
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">LOCAL PROPAGATION VIEW</p>
+          <h1>PSK Reporter</h1>
+          <p class="hero-copy">
+            See the stations you hear and the stations hearing you, using the documented PSK Reporter XML feed.
+          </p>
+        </div>
+        <div class="signal-mark" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+      </header>
+
+      <section class="control-panel" aria-labelledby="query-heading">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">QUERY</p>
+            <h2 id="query-heading">Reception reports</h2>
+          </div>
+          <p class="service-note">Requests are cached for at least five minutes.</p>
+        </div>
+
+        <form id="report-form" class="query-form">
+          <label>
+            <span>Your callsign</span>
+            <input
+              id="callsign"
+              name="callsign"
+              value="KF6UFO"
+              minlength="3"
+              maxlength="20"
+              pattern="[A-Za-z0-9]+(/[A-Za-z0-9]+)*"
+              autocomplete="off"
+              spellcheck="false"
+              required
+            >
+          </label>
+
+          <label>
+            <span>Lookback</span>
+            <select id="lookback" name="lookback_seconds">
+              <option value="86400">24 hours</option>
+              <option value="43200">12 hours</option>
+              <option value="21600">6 hours</option>
+              <option value="10800">3 hours</option>
+              <option value="7200">2 hours</option>
+              <option value="3600" selected>1 hour</option>
+              <option value="1800">30 minutes</option>
+              <option value="900">15 minutes</option>
+            </select>
+          </label>
+
+          <fieldset class="direction-fieldset">
+            <legend>Direction</legend>
+            <div class="direction-options">
+              <label class="switch-option">
+                <input id="sent-by" name="sent_by" type="checkbox" checked>
+                <span>Sent by</span>
+              </label>
+              <label class="switch-option">
+                <input id="recv-by" name="recv_by" type="checkbox">
+                <span>Recv by</span>
+              </label>
+            </div>
+          </fieldset>
+
+          <button id="fetch-button" type="button">
+            <span>Fetch reports</span>
+            <span aria-hidden="true">→</span>
+          </button>
+        </form>
+      </section>
+
+      <section class="results-panel" aria-labelledby="results-heading">
+        <div class="section-heading results-heading">
+          <div>
+            <p class="section-kicker">RESULTS</p>
+            <h2 id="results-heading">Recent reception</h2>
+          </div>
+          <div id="fetch-meta" class="fetch-meta" hidden>
+            <span id="result-count"></span>
+            <span class="dot" aria-hidden="true"></span>
+            <span id="last-fetch"></span>
+            <span id="cache-badge" class="cache-badge"></span>
+          </div>
+        </div>
+
+        <details id="xml-trace" class="trace-panel">
+          <summary>
+            <span>XML request trace</span>
+            <span id="trace-summary" class="trace-summary">Idle</span>
+          </summary>
+          <div id="trace-content" class="trace-content">
+            Press Fetch reports to inspect the upstream request and XML response.
+          </div>
+        </details>
+
+        <div id="filter-bar" class="filter-bar" hidden>
+          <label>
+            <span>Band</span>
+            <select id="band-filter"><option value="">All bands</option></select>
+          </label>
+          <label>
+            <span>Mode</span>
+            <select id="mode-filter"><option value="">All modes</option></select>
+          </label>
+        </div>
+
+        <div id="status-message" class="status-message" role="status" aria-live="polite">
+          Enter your callsign to retrieve recent reports.
+        </div>
+
+        <div id="table-wrap" class="table-wrap" hidden>
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Report time (UTC)</th>
+                <th scope="col">Age</th>
+                <th scope="col">Direction</th>
+                <th scope="col">Transmitter</th>
+                <th scope="col">Receiver</th>
+                <th scope="col">Receiver grid</th>
+                <th scope="col">Frequency (Hz)</th>
+                <th scope="col">Band</th>
+                <th scope="col">Mode</th>
+              </tr>
+            </thead>
+            <tbody id="report-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer>
+        <span>pskreporter-local</span>
+        <a href="/api/docs">API documentation</a>
+      </footer>
+    </main>
+  </body>
+</html>

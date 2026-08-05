@@ -1,0 +1,22 @@
+[Unit]
+Description=PSK Reporter Local web application
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pskreporter
+Group=pskreporter
+WorkingDirectory=/opt/pskreporter-local
+Environment=PYTHONUNBUFFERED=1
+Environment=PSKR_CACHE_TTL_SECONDS=300
+ExecStart=/opt/pskreporter-local/.venv/bin/uvicorn pskreporter_local.app:app --host 127.0.0.1 --port 8765 --proxy-headers --forwarded-allow-ips=127.0.0.1
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

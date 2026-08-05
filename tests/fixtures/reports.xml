@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<receptionReports lastSequenceNumber="123456">
+  <receptionReport
+    receiverCallsign="W1RX"
+    receiverLocator="FN42hn"
+    senderCallsign="kf6ufo"
+    senderLocator="DM79lt"
+    frequency="14074000"
+    flowStartSeconds="1700000000"
+    mode="ft8"
+    futureAttribute="ignored" />
+  <receptionReport
+    receiverCallsign="N0RX"
+    senderCallsign="KF6UFO"
+    frequency="7074000"
+    flowStartSeconds="1700000060" />
+  <receptionReport
+    receiverCallsign="BAD"
+    senderCallsign="KF6UFO"
+    frequency="not-a-number"
+    flowStartSeconds="1700000120" />
+</receptionReports>
