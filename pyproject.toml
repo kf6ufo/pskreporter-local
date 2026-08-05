@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pskreporter-local"
+version = "0.1.0"
+description = "A local-first web interface for PSK Reporter reception reports"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "defusedxml>=0.7,<1",
+    "fastapi>=0.116,<1",
+    "httpx>=0.28,<1",
+    "uvicorn>=0.35,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<10",
+]
+
+[tool.setuptools.packages.find]
+include = ["pskreporter_local*"]
+
+[tool.setuptools.package-data]
+pskreporter_local = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
