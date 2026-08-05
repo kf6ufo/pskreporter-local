@@ -68,6 +68,8 @@ def parse_reception_reports(xml: bytes) -> ParsedReports:
                 receiver_call=receiver_call,
                 sender_locator=_optional_text(attrs.get("senderLocator")),
                 receiver_locator=_optional_text(attrs.get("receiverLocator")),
+                sender_region=_optional_text(attrs.get("senderRegion")),
+                sender_dxcc=_optional_text(attrs.get("senderDXCC")),
                 receiver_latitude=None,
                 receiver_longitude=None,
                 frequency_hz=frequency_hz,

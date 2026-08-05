@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from time import perf_counter
 
 import httpx
@@ -25,14 +26,25 @@ class PskReporterClient:
         self._settings = settings
 
     async def fetch(self, query: ReportQuery) -> ParsedReports:
+        report_limit = query.report_limit or self._settings.report_limit
         params: dict[str, str | int] = {
             query.direction.api_parameter: query.callsign,
             "flowStartSeconds": -query.lookback_seconds,
-            "rptlimit": self._settings.report_limit,
-            "rronly": 1,
-            "noactive": 1,
-            "nolocator": 1,
+            "rptlimit": report_limit,
+            "rronly": int(query.reception_reports_only),
+            "noactive": int(query.exclude_active_monitors),
+            "nolocator": int(query.include_reports_without_locator),
         }
+        if query.upstream_mode:
+            params["mode"] = query.upstream_mode
+        if query.frequency_range:
+            params["frange"] = query.frequency_range
+        if query.include_statistics:
+            params["statistics"] = 1
+        if query.modify_grid:
+            params["modify"] = "grid"
+        if query.last_sequence_number is not None:
+            params["lastseqno"] = query.last_sequence_number
         if self._settings.app_contact:
             params["appcontact"] = self._settings.app_contact
 
@@ -65,6 +77,7 @@ class PskReporterClient:
                 elapsed_ms=round((perf_counter() - started) * 1000),
                 response_bytes=0,
                 raw_xml="",
+                requested_report_limit=report_limit,
                 error=exc.__class__.__name__,
             )
             raise PskReporterUnavailable(
@@ -81,6 +94,7 @@ class PskReporterClient:
             response_bytes=len(response.content),
             raw_xml=raw_xml[:MAX_TRACE_XML_CHARS],
             raw_xml_truncated=len(raw_xml) > MAX_TRACE_XML_CHARS,
+            requested_report_limit=report_limit,
         )
 
         try:
@@ -106,6 +120,10 @@ class PskReporterClient:
             parsed = parse_reception_reports(response.content)
         except InvalidPskXml as exc:
             raise InvalidPskXml(str(exc), xml_trace=trace) from exc
+        trace = replace(
+            trace,
+            report_limit_reached=len(parsed.reports) >= report_limit,
+        )
         return ParsedReports(
             reports=parsed.reports,
             warnings=parsed.warnings,

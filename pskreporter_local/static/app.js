@@ -1,8 +1,19 @@
 const form = document.querySelector("#report-form");
+const callsignInput = document.querySelector("#callsign");
+const callsignHistoryList = document.querySelector("#callsign-history");
 const fetchButton = document.querySelector("#fetch-button");
 const lookbackSelect = document.querySelector("#lookback");
 const sentBy = document.querySelector("#sent-by");
 const recvBy = document.querySelector("#recv-by");
+const upstreamMode = document.querySelector("#upstream-mode");
+const frequencyRange = document.querySelector("#frequency-range");
+const reportLimit = document.querySelector("#report-limit");
+const lastSequenceNumber = document.querySelector("#last-sequence-number");
+const modify = document.querySelector("#modify");
+const receptionReportsOnly = document.querySelector("#rronly");
+const excludeActiveMonitors = document.querySelector("#noactive");
+const includeWithoutLocator = document.querySelector("#nolocator");
+const includeStatistics = document.querySelector("#statistics");
 const statusMessage = document.querySelector("#status-message");
 const tableWrap = document.querySelector("#table-wrap");
 const reportRows = document.querySelector("#report-rows");
@@ -12,6 +23,7 @@ const modeFilter = document.querySelector("#mode-filter");
 const fetchMeta = document.querySelector("#fetch-meta");
 const resultCount = document.querySelector("#result-count");
 const lastFetch = document.querySelector("#last-fetch");
+const oldestReport = document.querySelector("#oldest-report");
 const cacheBadge = document.querySelector("#cache-badge");
 const tracePanel = document.querySelector("#xml-trace");
 const traceSummary = document.querySelector("#trace-summary");
@@ -19,6 +31,69 @@ const traceContent = document.querySelector("#trace-content");
 
 let reports = [];
 const LOOKBACK_STORAGE_KEY = "pskreporter-local.lookback-seconds";
+const CALLSIGN_HISTORY_STORAGE_KEY = "pskreporter-local.callsign-history";
+const MAX_CALLSIGN_HISTORY = 10;
+const MAX_LOCATION_CHARS = 22;
+
+function renderCallsignHistory(history) {
+  callsignHistoryList.replaceChildren();
+  for (const callsign of history) {
+    const option = document.createElement("option");
+    option.value = callsign;
+    callsignHistoryList.appendChild(option);
+  }
+}
+
+function readCallsignHistory() {
+  try {
+    const stored = JSON.parse(
+      window.localStorage.getItem(CALLSIGN_HISTORY_STORAGE_KEY) || "[]",
+    );
+    return Array.isArray(stored)
+      ? stored.filter((value) => typeof value === "string").slice(0, MAX_CALLSIGN_HISTORY)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadCallsignHistory() {
+  renderCallsignHistory(readCallsignHistory());
+}
+
+function rememberCallsign(value) {
+  const callsign = value.trim().toUpperCase();
+  const previous = readCallsignHistory();
+  const history = [
+    callsign,
+    ...previous.filter((candidate) => candidate.toUpperCase() !== callsign),
+  ].slice(0, MAX_CALLSIGN_HISTORY);
+  try {
+    window.localStorage.setItem(CALLSIGN_HISTORY_STORAGE_KEY, JSON.stringify(history));
+  } catch {
+    // Callsign history is optional when browser storage is unavailable.
+  }
+  renderCallsignHistory(history);
+}
+
+async function loadAppConfig() {
+  try {
+    const response = await fetch("/api/config", {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) return;
+
+    const config = await response.json();
+    if (!callsignInput.value && config.default_callsign) {
+      callsignInput.value = config.default_callsign;
+    }
+    if (config.report_limit) {
+      reportLimit.value = String(config.report_limit);
+    }
+  } catch {
+    // Configuration is optional; operators can always enter a callsign manually.
+  }
+}
 
 function setLookbackSelection(value) {
   const validOption = [...lookbackSelect.options].find((option) => option.value === value);
@@ -67,6 +142,13 @@ function setStatus(message, kind = "") {
 
 function directionLabel(direction) {
   return direction === "recv_by" ? "Recv by" : "Sent by";
+}
+
+function lookbackLabel(seconds) {
+  const option = [...lookbackSelect.options].find(
+    (candidate) => Number(candidate.value) === Number(seconds),
+  );
+  return option ? option.textContent : `${seconds} seconds`;
 }
 
 function textElement(tag, text, className = "") {
@@ -120,6 +202,9 @@ function renderXmlTrace(entries, fallbackMessage = "No upstream trace was return
     const stats = document.createElement("div");
     stats.className = "trace-stats";
     const statValues = [
+      entry.lookback_seconds == null
+        ? null
+        : `${lookbackLabel(entry.lookback_seconds)} requested`,
       entry.elapsed_ms == null ? null : `${entry.elapsed_ms} ms`,
       entry.response_bytes == null
         ? null
@@ -127,6 +212,10 @@ function renderXmlTrace(entries, fallbackMessage = "No upstream trace was return
       entry.parsed_report_count == null
         ? null
         : `${entry.parsed_report_count} parsed report${entry.parsed_report_count === 1 ? "" : "s"}`,
+      entry.requested_report_limit == null
+        ? null
+        : `${Number(entry.requested_report_limit).toLocaleString("en-US")} report limit`,
+      entry.report_limit_reached ? "limit reached" : null,
       entry.fetched_at_utc ? `fetched ${displayUtc(entry.fetched_at_utc)}` : null,
     ];
     for (const value of statValues.filter(Boolean)) {
@@ -160,20 +249,23 @@ function displayUtc(isoText) {
   return isoText.replace("T", " ").replace("Z", "Z");
 }
 
-function reportAge(isoText) {
-  const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(isoText)) / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-  return `${Math.floor(seconds / 86400)}d`;
-}
-
 function appendCell(row, label, value, className = "") {
   const cell = document.createElement("td");
   cell.dataset.label = label;
   cell.textContent = value ?? "—";
   if (className) cell.className = className;
   row.appendChild(cell);
+  return cell;
+}
+
+function appendTruncatedCell(row, label, value) {
+  const cell = appendCell(row, label, value, "geography-cell");
+  const fullText = value == null ? "" : String(value);
+  if (fullText.length > MAX_LOCATION_CHARS) {
+    cell.textContent = `${fullText.slice(0, MAX_LOCATION_CHARS - 1)}…`;
+    cell.title = fullText;
+    cell.setAttribute("aria-label", fullText);
+  }
 }
 
 function relationshipLabel(directions) {
@@ -197,14 +289,15 @@ function renderReports() {
 
   for (const report of visibleReports) {
     const row = document.createElement("tr");
-    row.dataset.spotTime = report.spot_time_utc;
     appendCell(row, "Report time (UTC)", displayUtc(report.spot_time_utc));
-    appendCell(row, "Age", reportAge(report.spot_time_utc), "age-cell");
     appendCell(row, "Direction", relationshipLabel(report.directions), "direction-cell");
     appendCell(row, "Transmitter", report.sender_call, "call-cell");
+    appendCell(row, "Sender grid", report.sender_locator);
     appendCell(row, "Receiver", report.receiver_call, "call-cell");
     appendCell(row, "Receiver grid", report.receiver_locator);
-    appendCell(row, "Frequency (Hz)", report.frequency_hz.toLocaleString("en-US"));
+    appendTruncatedCell(row, "Sender region", report.sender_region);
+    appendTruncatedCell(row, "Sender DXCC", report.sender_dxcc);
+    appendCell(row, "F (MHz)", (report.frequency_hz / 1_000_000).toFixed(3));
     appendCell(row, "Band", report.band, "band-cell");
     appendCell(row, "Mode", report.mode, "mode-cell");
     reportRows.appendChild(row);
@@ -255,7 +348,25 @@ async function fetchReports() {
     lookback_seconds: selectedLookback,
     sent_by: String(sentBy.checked),
     recv_by: String(recvBy.checked),
+    rptlimit: reportLimit.value,
+    rronly: String(receptionReportsOnly.checked),
+    noactive: String(excludeActiveMonitors.checked),
+    nolocator: String(includeWithoutLocator.checked),
+    statistics: String(includeStatistics.checked),
   });
+  if (upstreamMode.value.trim()) {
+    params.set("upstream_mode", upstreamMode.value.trim().toUpperCase());
+  }
+  if (frequencyRange.value.trim()) {
+    params.set("frange", frequencyRange.value.trim());
+  }
+  if (lastSequenceNumber.value) {
+    params.set("lastseqno", lastSequenceNumber.value);
+  }
+  if (modify.value) {
+    params.set("modify", modify.value);
+  }
+  rememberCallsign(params.get("callsign"));
   rememberLookbackPreference();
 
   fetchButton.disabled = true;
@@ -280,6 +391,9 @@ async function fetchReports() {
 
     reports = payload.reports;
     lastFetch.textContent = `Fetched ${displayUtc(payload.fetched_at_utc)}`;
+    oldestReport.textContent = payload.oldest_report_utc
+      ? `Oldest returned ${displayUtc(payload.oldest_report_utc)}`
+      : "No reports returned";
     cacheBadge.textContent =
       payload.cache_status === "cached"
         ? "Cached"
@@ -296,6 +410,12 @@ async function fetchReports() {
 
     configureFilters();
     renderReports();
+    if (payload.truncated) {
+      const oldest = payload.oldest_report_utc
+        ? ` Oldest returned report: ${displayUtc(payload.oldest_report_utc)}.`
+        : "";
+      setStatus(`${payload.warnings.join(" ")}${oldest}`, "warning");
+    }
   } catch (error) {
     reports = [];
     if (!traceRendered) {
@@ -328,10 +448,5 @@ bandFilter.addEventListener("change", renderReports);
 modeFilter.addEventListener("change", renderReports);
 
 restoreLookbackPreference();
-
-setInterval(() => {
-  for (const row of reportRows.querySelectorAll("tr")) {
-    const ageCell = row.querySelector(".age-cell");
-    if (ageCell) ageCell.textContent = reportAge(row.dataset.spotTime);
-  }
-}, 30_000);
+loadCallsignHistory();
+void loadAppConfig();

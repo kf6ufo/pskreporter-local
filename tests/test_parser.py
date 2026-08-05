@@ -26,6 +26,8 @@ def test_parses_reports_and_preserves_map_fields() -> None:
     assert oldest.spot_time_utc == "2023-11-14T22:13:20Z"
     assert oldest.sender_call == "KF6UFO"
     assert oldest.sender_locator == "DM79lt"
+    assert oldest.sender_region == "Colorado"
+    assert oldest.sender_dxcc == "United States"
     assert oldest.receiver_locator == "FN42hn"
     assert oldest.receiver_latitude is None
     assert oldest.receiver_longitude is None

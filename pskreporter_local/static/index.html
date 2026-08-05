@@ -39,27 +39,24 @@
             <input
               id="callsign"
               name="callsign"
-              value="KF6UFO"
+              list="callsign-history"
+              placeholder="N0CALL"
               minlength="3"
               maxlength="20"
               pattern="[A-Za-z0-9]+(/[A-Za-z0-9]+)*"
-              autocomplete="off"
+              autocomplete="on"
               spellcheck="false"
               required
             >
+            <datalist id="callsign-history"></datalist>
           </label>
 
           <label>
             <span>Lookback</span>
             <select id="lookback" name="lookback_seconds">
-              <option value="86400">24 hours</option>
-              <option value="43200">12 hours</option>
-              <option value="21600">6 hours</option>
-              <option value="10800">3 hours</option>
-              <option value="7200">2 hours</option>
-              <option value="3600" selected>1 hour</option>
+              <option value="3600">1 hour</option>
               <option value="1800">30 minutes</option>
-              <option value="900">15 minutes</option>
+              <option value="900" selected>15 minutes</option>
             </select>
           </label>
 
@@ -81,6 +78,93 @@
             <span>Fetch reports</span>
             <span aria-hidden="true">→</span>
           </button>
+
+          <details class="advanced-query-options">
+            <summary>
+              <span>Advanced query options</span>
+              <span>PSK Reporter XML parameters</span>
+            </summary>
+            <div class="advanced-query-body">
+              <div class="advanced-query-grid">
+                <label>
+                  <span><code>mode</code></span>
+                  <input
+                    id="upstream-mode"
+                    name="upstream_mode"
+                    maxlength="20"
+                    placeholder="Any mode"
+                    autocomplete="off"
+                  >
+                </label>
+                <label>
+                  <span><code>frange</code></span>
+                  <input
+                    id="frequency-range"
+                    name="frange"
+                    maxlength="32"
+                    pattern="[0-9]+-[0-9]+"
+                    placeholder="14000000-14100000"
+                    inputmode="numeric"
+                    autocomplete="off"
+                  >
+                </label>
+                <label>
+                  <span><code>rptlimit</code></span>
+                  <input
+                    id="report-limit"
+                    name="rptlimit"
+                    type="number"
+                    min="1"
+                    max="10000"
+                    value="1000"
+                    required
+                  >
+                </label>
+                <label>
+                  <span><code>lastseqno</code></span>
+                  <input
+                    id="last-sequence-number"
+                    name="lastseqno"
+                    type="number"
+                    min="0"
+                    placeholder="Not set"
+                  >
+                </label>
+                <label>
+                  <span><code>modify</code></span>
+                  <select id="modify" name="modify">
+                    <option value="">None</option>
+                    <option value="grid">grid — interpret call as grid</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="advanced-flags">
+                <label class="advanced-flag">
+                  <input id="rronly" name="rronly" type="checkbox" checked>
+                  <span><code>rronly</code><small>Return reception reports only</small></span>
+                </label>
+                <label class="advanced-flag">
+                  <input id="noactive" name="noactive" type="checkbox" checked>
+                  <span><code>noactive</code><small>Exclude active-monitor records</small></span>
+                </label>
+                <label class="advanced-flag">
+                  <input id="nolocator" name="nolocator" type="checkbox" checked>
+                  <span><code>nolocator</code><small>Include reports without locators</small></span>
+                </label>
+                <label class="advanced-flag">
+                  <input id="statistics" name="statistics" type="checkbox">
+                  <span><code>statistics</code><small>Request statistical information</small></span>
+                </label>
+              </div>
+
+              <p class="advanced-query-note">
+                The primary controls set the callsign parameter and <code>flowStartSeconds</code>.
+                <code>appcontact</code> comes from <code>config.json</code>. <code>callback</code>
+                is disabled because this application requires an XML response.
+              </p>
+            </div>
+          </details>
         </form>
       </section>
 
@@ -94,6 +178,8 @@
             <span id="result-count"></span>
             <span class="dot" aria-hidden="true"></span>
             <span id="last-fetch"></span>
+            <span class="dot" aria-hidden="true"></span>
+            <span id="oldest-report"></span>
             <span id="cache-badge" class="cache-badge"></span>
           </div>
         </div>
@@ -128,12 +214,14 @@
             <thead>
               <tr>
                 <th scope="col">Report time (UTC)</th>
-                <th scope="col">Age</th>
                 <th scope="col">Direction</th>
                 <th scope="col">Transmitter</th>
+                <th scope="col">Sender grid</th>
                 <th scope="col">Receiver</th>
                 <th scope="col">Receiver grid</th>
-                <th scope="col">Frequency (Hz)</th>
+                <th scope="col">Sender region</th>
+                <th scope="col">Sender DXCC</th>
+                <th scope="col">F (MHz)</th>
                 <th scope="col">Band</th>
                 <th scope="col">Mode</th>
               </tr>

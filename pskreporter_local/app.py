@@ -34,12 +34,15 @@ def _result_trace(query: ReportQuery, result: ReportsResult) -> dict[str, object
         "response_bytes": None,
         "raw_xml": "",
         "raw_xml_truncated": False,
+        "requested_report_limit": None,
+        "report_limit_reached": False,
         "error": None,
     }
     entry.update(
         {
             "cache_hit": result.cache_hit,
             "fetched_at_utc": _utc_text(result.payload.fetched_at),
+            "lookback_seconds": query.lookback_seconds,
             "parsed_report_count": len(result.payload.parsed.reports),
         }
     )
@@ -55,7 +58,7 @@ def create_app(
     reports_service: ReportsService | None = None,
     settings: Settings | None = None,
 ) -> FastAPI:
-    resolved_settings = settings or Settings.from_environment()
+    resolved_settings = settings or Settings.from_file()
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
@@ -93,15 +96,31 @@ def create_app(
             "version": __version__,
         }
 
+    @application.get("/api/config", include_in_schema=False)
+    async def browser_config() -> dict[str, object]:
+        return {
+            "default_callsign": resolved_settings.default_callsign,
+            "report_limit": resolved_settings.report_limit,
+        }
+
     @application.get("/api/reports")
     async def reports(
         request: Request,
         callsign: str = Query(min_length=3, max_length=20),
-        lookback_seconds: int = Query(default=3600, ge=60, le=86_400),
+        lookback_seconds: int = Query(default=900, ge=900, le=3600),
         sent_by: bool = Query(default=True),
         recv_by: bool = Query(default=False),
         band: str | None = Query(default=None, max_length=12),
         mode: str | None = Query(default=None, max_length=20),
+        upstream_mode: str | None = Query(default=None, max_length=20),
+        rptlimit: int | None = Query(default=None, ge=1, le=10_000),
+        rronly: bool = Query(default=True),
+        noactive: bool = Query(default=True),
+        nolocator: bool = Query(default=True),
+        frange: str | None = Query(default=None, max_length=32),
+        statistics: bool = Query(default=False),
+        modify: str | None = Query(default=None, max_length=12),
+        lastseqno: int | None = Query(default=None, ge=0),
     ) -> JSONResponse:
         directions: list[QueryDirection] = []
         if sent_by:
@@ -121,7 +140,20 @@ def create_app(
 
         try:
             queries = [
-                ReportQuery.normalized(callsign, lookback_seconds, direction)
+                ReportQuery.normalized(
+                    callsign,
+                    lookback_seconds,
+                    direction,
+                    upstream_mode=upstream_mode,
+                    report_limit=rptlimit or resolved_settings.report_limit,
+                    reception_reports_only=rronly,
+                    exclude_active_monitors=noactive,
+                    include_reports_without_locator=nolocator,
+                    frequency_range=frange,
+                    include_statistics=statistics,
+                    modify=modify,
+                    last_sequence_number=lastseqno,
+                )
                 for direction in directions
             ]
         except InvalidQuery as exc:
@@ -160,11 +192,24 @@ def create_app(
         normalized_mode = mode.strip().upper() if mode else None
         merged: dict[tuple[object, ...], dict[str, object]] = {}
         warnings: list[str] = []
+        truncated = False
         for query, result in zip(queries, results, strict=True):
             warnings.extend(
                 f"{query.direction.value}: {warning}"
                 for warning in result.payload.parsed.warnings
             )
+            trace = result.payload.parsed.xml_trace
+            if trace is not None and trace.report_limit_reached:
+                truncated = True
+                report_limit = trace.requested_report_limit or len(
+                    result.payload.parsed.reports
+                )
+                warnings.append(
+                    f"{query.direction.value}: PSK Reporter returned the configured "
+                    f"{report_limit:,}-report limit. The selected "
+                    "lookback may be incomplete; increase rptlimit in Advanced query "
+                    "options (or its report_limit default in config.json) if needed."
+                )
             for report in result.payload.parsed.reports:
                 identity = (
                     report.spot_time_utc,
@@ -193,6 +238,10 @@ def create_app(
             and (normalized_mode is None or report["mode"] == normalized_mode)
         ]
         filtered.sort(key=lambda report: str(report["spot_time_utc"]), reverse=True)
+        oldest_report_utc = min(
+            (str(report["spot_time_utc"]) for report in merged.values()),
+            default=None,
+        )
         status = "ok" if filtered else "empty"
         cache_hits = [result.cache_hit for result in results]
         cache_status = (
@@ -217,9 +266,20 @@ def create_app(
                     "directions": [direction.value for direction in directions],
                     "band": normalized_band,
                     "mode": normalized_mode,
+                    "upstream_mode": queries[0].upstream_mode,
+                    "rptlimit": queries[0].report_limit,
+                    "rronly": queries[0].reception_reports_only,
+                    "noactive": queries[0].exclude_active_monitors,
+                    "nolocator": queries[0].include_reports_without_locator,
+                    "frange": queries[0].frequency_range,
+                    "statistics": queries[0].include_statistics,
+                    "modify": "grid" if queries[0].modify_grid else None,
+                    "lastseqno": queries[0].last_sequence_number,
                 },
                 "reports": filtered,
                 "report_count": len(filtered),
+                "oldest_report_utc": oldest_report_utc,
+                "truncated": truncated,
                 "fetched_at_utc": _utc_text(fetched_at),
                 "cache_hit": all(cache_hits),
                 "cache_status": cache_status,
