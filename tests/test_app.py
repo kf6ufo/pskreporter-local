@@ -56,11 +56,16 @@ class FakePskClient:
         return len(self.queries)
 
 
-def build_client(parsed: ParsedReports) -> tuple[TestClient, FakePskClient]:
+def build_client(
+    parsed: ParsedReports,
+    settings: Settings | None = None,
+) -> tuple[TestClient, FakePskClient]:
     fake = FakePskClient(parsed)
     clock = lambda: datetime(2026, 8, 5, 18, 0, tzinfo=UTC)
     service = ReportsService(fake, cache_ttl_seconds=300, clock=clock)
-    return TestClient(create_app(reports_service=service)), fake
+    return TestClient(
+        create_app(reports_service=service, settings=settings or Settings())
+    ), fake
 
 
 def test_health_and_home_page() -> None:
@@ -73,18 +78,23 @@ def test_health_and_home_page() -> None:
     assert health.status_code == 200
     assert health.json()["status"] == "ok"
     assert home.status_code == 200
-    assert "PSK Reporter" in home.text
+    assert "PSK Reporter + ADIF" in home.text
+    assert "LIVE ACTIVITY · LOG HISTORY" in home.text
+    assert "whether you have worked them on this band or any band" in home.text
     assert "Report time (UTC)" in home.text
     assert "Sender grid" in home.text
     assert "Receiver grid" in home.text
     assert "Sender region" in home.text
     assert "Sender DXCC" in home.text
     assert "F (MHz)" in home.text
+    assert "QSOs B/T" in home.text
     assert "Frequency (Hz)" not in home.text
     assert 'list="callsign-history"' in home.text
     assert '<datalist id="callsign-history">' in home.text
     assert 'autocomplete="on"' in home.text
     assert "Advanced query options" in home.text
+    assert "ADIF log" in home.text
+    assert 'id="reload-adif"' in home.text
     for control_id in (
         "upstream-mode",
         "frequency-range",
@@ -118,6 +128,42 @@ def test_browser_config_supplies_operator_default_callsign() -> None:
     }
 
 
+def test_adif_status_loads_and_manually_reloads_configured_file(tmp_path) -> None:
+    log_path = tmp_path / "operator.adi"
+    log_path.write_text("<CALL:5>K1ABC<EOR>", encoding="utf-8")
+    client = TestClient(
+        create_app(
+            reports_service=object(),
+            settings=Settings(adif_file_path=str(log_path)),
+        )
+    )
+
+    with client:
+        initial = client.get("/api/adif")
+        log_path.write_text(
+            "<CALL:5>K1ABC<EOR>\n<CALL:5>W1XYZ<EOR>", encoding="utf-8"
+        )
+        reloaded = client.post("/api/adif/reload")
+
+    assert initial.status_code == 200
+    assert initial.json()["status"] == "loaded"
+    assert initial.json()["qso_count"] == 1
+    assert initial.json()["path"] == str(log_path)
+    assert reloaded.status_code == 200
+    assert reloaded.json()["status"] == "loaded"
+    assert reloaded.json()["qso_count"] == 2
+
+
+def test_adif_status_is_nonfatal_when_no_file_is_configured() -> None:
+    client, _ = build_client(ParsedReports(()))
+    with client:
+        response = client.get("/api/adif")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "not_configured"
+    assert response.json()["configured"] is False
+
+
 def test_lookback_options_match_supported_live_intervals() -> None:
     client, _ = build_client(ParsedReports(()))
     with client:
@@ -149,6 +195,10 @@ def test_reports_are_normalized_filtered_and_cached() -> None:
     assert first.json()["query"]["callsign"] == "KF6UFO"
     assert first.json()["query"]["directions"] == ["sent_by"]
     assert first.json()["reports"][0]["directions"] == ["sent_by"]
+    assert first.json()["reports"][0]["qso_call"] == "N0RX"
+    assert first.json()["reports"][0]["qso_count"] is None
+    assert first.json()["reports"][0]["qso_count_band"] is None
+    assert first.json()["reports"][0]["qso_count_total"] is None
     assert first.json()["reports"][1]["sender_region"] == "Colorado"
     assert first.json()["reports"][1]["sender_dxcc"] == "United States"
     assert first.json()["xml_trace"][0]["direction"] == "sent_by"
@@ -160,6 +210,50 @@ def test_reports_are_normalized_filtered_and_cached() -> None:
     assert second.json()["cache_hit"] is True
     assert second.json()["reports"][0]["band"] == "20m"
     assert fake.calls == 1
+
+
+def test_qso_count_follows_the_other_station_in_both_directions(tmp_path) -> None:
+    parsed = parse_reception_reports(
+        b"""<?xml version="1.0"?>
+        <receptionReports>
+          <receptionReport receiverCallsign="W1RX" senderCallsign="KF6UFO"
+            frequency="28074000" flowStartSeconds="1700000000" mode="FT8" />
+          <receptionReport receiverCallsign="KF6UFO" senderCallsign="K1ABC"
+            frequency="28074000" flowStartSeconds="1700000060" mode="FT8" />
+        </receptionReports>"""
+    )
+    log_path = tmp_path / "operator.adi"
+    log_path.write_text(
+        "<CALL:4>W1RX<BAND:3>10M<EOR>"
+        "<CALL:4>W1RX<BAND:3>20M<EOR>"
+        "<CALL:5>K1ABC<BAND:3>10M<EOR>"
+        "<CALL:5>K1ABC<BAND:3>10M<EOR>"
+        "<CALL:5>K1ABC<BAND:2>6M<EOR>",
+        encoding="utf-8",
+    )
+    client, _ = build_client(parsed, Settings(adif_file_path=str(log_path)))
+
+    with client:
+        response = client.get(
+            "/api/reports?callsign=KF6UFO&lookback_seconds=900"
+            "&sent_by=true&recv_by=true"
+        )
+
+    assert response.status_code == 200
+    reports = {
+        (report["sender_call"], report["receiver_call"]): report
+        for report in response.json()["reports"]
+    }
+    sent_report = reports[("KF6UFO", "W1RX")]
+    received_report = reports[("K1ABC", "KF6UFO")]
+    assert sent_report["qso_call"] == "W1RX"
+    assert sent_report["qso_count_band"] == 1
+    assert sent_report["qso_count_total"] == 2
+    assert sent_report["qso_count"] == 2
+    assert received_report["qso_call"] == "K1ABC"
+    assert received_report["qso_count_band"] == 2
+    assert received_report["qso_count_total"] == 3
+    assert received_report["qso_count"] == 3
 
 
 def test_advanced_query_options_are_normalized_and_returned() -> None:

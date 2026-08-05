@@ -14,6 +14,10 @@ const receptionReportsOnly = document.querySelector("#rronly");
 const excludeActiveMonitors = document.querySelector("#noactive");
 const includeWithoutLocator = document.querySelector("#nolocator");
 const includeStatistics = document.querySelector("#statistics");
+const adifSummary = document.querySelector("#adif-summary");
+const adifPath = document.querySelector("#adif-path");
+const adifStatus = document.querySelector("#adif-status");
+const reloadAdifButton = document.querySelector("#reload-adif");
 const statusMessage = document.querySelector("#status-message");
 const tableWrap = document.querySelector("#table-wrap");
 const reportRows = document.querySelector("#report-rows");
@@ -92,6 +96,68 @@ async function loadAppConfig() {
     }
   } catch {
     // Configuration is optional; operators can always enter a callsign manually.
+  }
+}
+
+function renderAdifStatus(status) {
+  adifPath.textContent = status.path || "Not configured";
+  reloadAdifButton.disabled = !status.configured;
+
+  if (status.status === "loaded") {
+    const qsoLabel = `${status.qso_count.toLocaleString("en-US")} QSO${status.qso_count === 1 ? "" : "s"}`;
+    adifSummary.textContent = `${qsoLabel} loaded`;
+    adifStatus.textContent = status.file_modified_at_utc
+      ? `${qsoLabel}; file modified ${displayUtc(status.file_modified_at_utc)}.`
+      : `${qsoLabel} loaded.`;
+    adifStatus.className = "loaded";
+    return;
+  }
+
+  if (status.status === "error") {
+    adifSummary.textContent = "Load failed";
+    adifStatus.textContent = status.message || "The configured ADI file could not be loaded.";
+    adifStatus.className = "error";
+    return;
+  }
+
+  adifSummary.textContent = "Not configured";
+  adifStatus.innerHTML = "Set <code>adif_file_path</code> in <code>config.json</code> and restart the application.";
+  adifStatus.className = "";
+}
+
+async function loadAdifStatus() {
+  try {
+    const response = await fetch("/api/adif", {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) throw new Error("Unable to read ADIF status.");
+    renderAdifStatus(await response.json());
+  } catch (error) {
+    adifSummary.textContent = "Status unavailable";
+    adifStatus.textContent = error.message || "Unable to read ADIF status.";
+    adifStatus.className = "error";
+  }
+}
+
+async function reloadAdif() {
+  reloadAdifButton.disabled = true;
+  reloadAdifButton.textContent = "Reloading…";
+  adifStatus.textContent = "Reading the configured ADI file…";
+  adifStatus.className = "";
+  try {
+    const response = await fetch("/api/adif/reload", {
+      method: "POST",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) throw new Error("Unable to reload the ADI file.");
+    renderAdifStatus(await response.json());
+  } catch (error) {
+    adifSummary.textContent = "Reload failed";
+    adifStatus.textContent = error.message || "Unable to reload the ADI file.";
+    adifStatus.className = "error";
+  } finally {
+    reloadAdifButton.textContent = "Reload ADIF";
+    if (adifPath.textContent !== "Not configured") reloadAdifButton.disabled = false;
   }
 }
 
@@ -295,6 +361,26 @@ function renderReports() {
     appendCell(row, "Sender grid", report.sender_locator);
     appendCell(row, "Receiver", report.receiver_call, "call-cell");
     appendCell(row, "Receiver grid", report.receiver_locator);
+    const qsoText = report.qso_count_total == null
+      ? null
+      : `${report.qso_count_band == null ? "—" : report.qso_count_band.toLocaleString("en-US")}/${report.qso_count_total.toLocaleString("en-US")}`;
+    const qsoClass = report.qso_count_band > 0
+      ? "qso-cell band-worked"
+      : report.qso_count_total > 0
+        ? "qso-cell other-band-worked"
+        : "qso-cell";
+    const qsoCell = appendCell(
+      row,
+      "QSOs B/T",
+      qsoText,
+      qsoClass,
+    );
+    if (report.qso_call) {
+      const bandLabel = report.band || "this band";
+      qsoCell.title = report.qso_count_total == null
+        ? `No ADIF count available for ${report.qso_call}`
+        : `${report.qso_count_band ?? 0} QSOs with ${report.qso_call} on ${bandLabel}; ${report.qso_count_total} across all bands`;
+    }
     appendTruncatedCell(row, "Sender region", report.sender_region);
     appendTruncatedCell(row, "Sender DXCC", report.sender_dxcc);
     appendCell(row, "F (MHz)", (report.frequency_hz / 1_000_000).toFixed(3));
@@ -446,7 +532,9 @@ sentBy.addEventListener("change", () => keepOneDirectionSelected(sentBy));
 recvBy.addEventListener("change", () => keepOneDirectionSelected(recvBy));
 bandFilter.addEventListener("change", renderReports);
 modeFilter.addEventListener("change", renderReports);
+reloadAdifButton.addEventListener("click", () => void reloadAdif());
 
 restoreLookbackPreference();
 loadCallsignHistory();
 void loadAppConfig();
+void loadAdifStatus();

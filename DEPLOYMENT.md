@@ -37,6 +37,7 @@ Edit `config.json` before starting the application. At minimum, replace `N0CALL`
 {
   "default_callsign": "N0CALL",
   "app_contact": null,
+  "adif_file_path": null,
   "cache_ttl_seconds": 300,
   "report_limit": 1000,
   "http_timeout_seconds": 10,
@@ -46,6 +47,14 @@ Edit `config.json` before starting the application. At minimum, replace `N0CALL`
 ```
 
 `app_contact` may be `null` or a contact email address. The remaining defaults are appropriate for the first release and normally do not need adjustment.
+
+To load an amateur-radio log, set `adif_file_path` to an absolute server path or a path relative to this `config.json` file:
+
+```json
+"adif_file_path": "/path/on/server/operator.adi"
+```
+
+The service account must have read permission for the file and every parent directory. When the browser is on a different computer, the path still refers to the server; copy, synchronize, or mount the log on that server. No database is required—the file is parsed into memory at startup and whenever the operator presses **Reload ADIF**.
 
 The application looks for `config.json` in its working directory. A service manager must therefore use the directory containing this file as the process working directory. Restart the application after every configuration change.
 
@@ -88,6 +97,7 @@ curl http://SERVER_HOSTNAME_OR_ADDRESS:8765/api/health
 A healthy instance returns JSON containing `"status":"ok"`. Then open the main page and confirm that:
 
 - the callsign from `config.json` appears in the query form;
+- the ADIF section shows the configured path and QSO count, when enabled;
 - a 15-minute request returns reports or a clear empty-result message; and
 - the XML request trace shows the upstream request and response.
 
@@ -120,4 +130,4 @@ Run the health check and a 15-minute query after every update. Because `config.j
 
 ## Security boundary
 
-This release has no authentication and displays public reception reports. Limit direct access to a trusted network. Add the platform's normal authentication and HTTPS controls before publishing it on the internet or before adding private ADIF, logging, or callsign-account data.
+This release has no authentication. Reception reports are public, but the configured ADIF path, file metadata, and QSO count are operator data. Limit access to a trusted network and add the platform's normal authentication and HTTPS controls before publishing the application on the internet.

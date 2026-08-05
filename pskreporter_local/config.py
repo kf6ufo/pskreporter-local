@@ -45,6 +45,7 @@ class Settings:
     max_xml_bytes: int = 5_000_000
     default_callsign: str | None = None
     app_contact: str | None = None
+    adif_file_path: str | None = None
 
     @classmethod
     def from_file(cls, path: str | Path = DEFAULT_CONFIG_PATH) -> "Settings":
@@ -83,6 +84,13 @@ class Settings:
                     'Configuration setting "default_callsign" is not a valid callsign.'
                 )
 
+        adif_file_path = _optional_text(data, "adif_file_path")
+        if adif_file_path:
+            resolved_adif_path = Path(adif_file_path).expanduser()
+            if not resolved_adif_path.is_absolute():
+                resolved_adif_path = config_path.parent / resolved_adif_path
+            adif_file_path = str(resolved_adif_path.resolve(strict=False))
+
         return cls(
             query_url=query_url.strip(),
             cache_ttl_seconds=max(
@@ -98,4 +106,5 @@ class Settings:
             ),
             default_callsign=default_callsign,
             app_contact=_optional_text(data, "app_contact"),
+            adif_file_path=adif_file_path,
         )

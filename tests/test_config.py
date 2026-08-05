@@ -22,6 +22,7 @@ def test_config_file_is_loaded_normalized_and_bounded(tmp_path) -> None:
                 "report_limit": 250,
                 "http_timeout_seconds": 8.5,
                 "max_xml_bytes": 200000,
+                "adif_file_path": "logs/operator.adi",
             }
         ),
         encoding="utf-8",
@@ -35,6 +36,7 @@ def test_config_file_is_loaded_normalized_and_bounded(tmp_path) -> None:
     assert settings.report_limit == 250
     assert settings.http_timeout_seconds == 8.5
     assert settings.max_xml_bytes == 200000
+    assert settings.adif_file_path == str(tmp_path / "logs" / "operator.adi")
 
 
 @pytest.mark.parametrize(

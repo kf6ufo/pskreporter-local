@@ -1,0 +1,4 @@
+Generated test log
+<ADIF_VER:5>3.1.4<PROGRAMID:4>TEST<EOH>
+<CALL:5>K1ABC<BAND:3>10M<MODE:3>FT8<QSO_DATE:8>20260805<EOR>
+<call:5>W1XYZ<band:2>6M<mode:3>FT8<qso_date:8>20260804<eor>
