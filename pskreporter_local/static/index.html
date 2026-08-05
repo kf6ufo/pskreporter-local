@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark">
-    <title>PSK Reporter Local</title>
+    <title>PSK Reporter + ADIF</title>
     <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/assets/styles.css">
     <script src="/assets/app.js?v=0.3.0" defer></script>
@@ -13,10 +13,10 @@
     <main class="page-shell">
       <header class="hero">
         <div>
-          <p class="eyebrow">LOCAL PROPAGATION VIEW</p>
-          <h1>PSK Reporter</h1>
+          <p class="eyebrow">LIVE ACTIVITY · LOG HISTORY</p>
+          <h1>PSK Reporter + ADIF</h1>
           <p class="hero-copy">
-            See the stations you hear and the stations hearing you, using the documented PSK Reporter XML feed.
+            See who is on the air now—and whether you have worked them on this band or any band—by combining PSK Reporter reception reports with your local ADIF log.
           </p>
         </div>
         <div class="signal-mark" aria-hidden="true">
@@ -166,6 +166,25 @@
             </div>
           </details>
         </form>
+
+        <details class="adif-options">
+          <summary>
+            <span>ADIF log</span>
+            <span id="adif-summary">Checking configuration…</span>
+          </summary>
+          <div class="adif-body">
+            <div class="adif-location">
+              <span>ADI file location on this server</span>
+              <code id="adif-path">Not configured</code>
+            </div>
+            <div class="adif-actions">
+              <button id="reload-adif" type="button" disabled>Reload ADIF</button>
+              <p id="adif-status" role="status" aria-live="polite">
+                Set <code>adif_file_path</code> in <code>config.json</code> and restart the application.
+              </p>
+            </div>
+          </div>
+        </details>
       </section>
 
       <section class="results-panel" aria-labelledby="results-heading">
@@ -219,6 +238,7 @@
                 <th scope="col">Sender grid</th>
                 <th scope="col">Receiver</th>
                 <th scope="col">Receiver grid</th>
+                <th scope="col" title="QSOs on this band / all bands">QSOs B/T</th>
                 <th scope="col">Sender region</th>
                 <th scope="col">Sender DXCC</th>
                 <th scope="col">F (MHz)</th>

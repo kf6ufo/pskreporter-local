@@ -1,6 +1,7 @@
 {
   "default_callsign": "N0CALL",
   "app_contact": null,
+  "adif_file_path": null,
   "cache_ttl_seconds": 300,
   "report_limit": 1000,
   "http_timeout_seconds": 10,

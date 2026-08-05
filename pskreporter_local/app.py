@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from .adif import AdifLogService
 from .client import PskReporterClient, PskReporterUnavailable
 from .config import Settings
 from .models import InvalidQuery, QueryDirection, ReportQuery
@@ -54,14 +55,27 @@ def _error_trace(error: Exception) -> list[dict[str, object]]:
     return [trace.to_dict()] if trace is not None else []
 
 
+def _other_station(report: dict[str, object], operator_call: str) -> str | None:
+    sender_call = str(report["sender_call"]).upper()
+    receiver_call = str(report["receiver_call"]).upper()
+    if sender_call == operator_call and receiver_call != operator_call:
+        return receiver_call
+    if receiver_call == operator_call and sender_call != operator_call:
+        return sender_call
+    return None
+
+
 def create_app(
     reports_service: ReportsService | None = None,
     settings: Settings | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_file()
+    adif_log = AdifLogService(resolved_settings.adif_file_path)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
+        application.state.adif_log = adif_log
+        await asyncio.to_thread(adif_log.reload)
         if reports_service is not None:
             application.state.reports_service = reports_service
             yield
@@ -102,6 +116,17 @@ def create_app(
             "default_callsign": resolved_settings.default_callsign,
             "report_limit": resolved_settings.report_limit,
         }
+
+    @application.get("/api/adif")
+    async def adif_status(request: Request) -> dict[str, object]:
+        service: AdifLogService = request.app.state.adif_log
+        return service.status.to_dict()
+
+    @application.post("/api/adif/reload")
+    async def reload_adif(request: Request) -> dict[str, object]:
+        service: AdifLogService = request.app.state.adif_log
+        status = await asyncio.to_thread(service.reload)
+        return status.to_dict()
 
     @application.get("/api/reports")
     async def reports(
@@ -230,6 +255,17 @@ def create_app(
                         and query.direction.value not in report_directions
                     ):
                         report_directions.append(query.direction.value)
+
+        adif_service: AdifLogService = request.app.state.adif_log
+        operator_call = queries[0].callsign
+        for report in merged.values():
+            qso_call = _other_station(report, operator_call)
+            report["qso_call"] = qso_call
+            report_band = str(report["band"]) if report["band"] is not None else None
+            counts = adif_service.qso_counts_for(qso_call, report_band) if qso_call else None
+            report["qso_count_band"] = counts[0] if counts is not None else None
+            report["qso_count_total"] = counts[1] if counts is not None else None
+            report["qso_count"] = report["qso_count_total"]
 
         filtered = [
             report
