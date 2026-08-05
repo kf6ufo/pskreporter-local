@@ -1,10 +1,10 @@
 # pskreporter-local
 
+![PSK Reporter and ADIF live operating view](docs/images/pskreporter-adif-live-view.png)
+
 `pskreporter-local` is a local-first web application that combines recent amateur-radio reception reports from the documented [PSK Reporter XML query interface](https://www.pskreporter.info/pskdev.html) with your local ADIF log.
 
 Its central purpose is to answer an immediately useful operating question: **Which stations are on the air right now that I have not worked?** The live table places current PSK Reporter activity beside your QSO history, making unworked stations—and stations worked on another band but not the current one—visible at a glance.
-
-![PSK Reporter and ADIF live operating view](docs/images/pskreporter-adif-live-view.png)
 
 The first release is intentionally table-focused. It provides this responsive live operating view without requiring a database or cloud account. Your ADIF log stays on the machine running the application and is read-only.
 
