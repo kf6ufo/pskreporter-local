@@ -1,0 +1,9 @@
+{
+  "default_callsign": "N0CALL",
+  "app_contact": null,
+  "cache_ttl_seconds": 300,
+  "report_limit": 1000,
+  "http_timeout_seconds": 10,
+  "max_xml_bytes": 5000000,
+  "query_url": "https://retrieve.pskreporter.info/query"
+}

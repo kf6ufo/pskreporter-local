@@ -1,104 +1,123 @@
-# Linux deployment
+# Deployment
 
-This deployment serves the application at `http://10.176.1.6/` through Nginx. FastAPI remains bound to `127.0.0.1:8765`, so it is reachable only through the local reverse proxy.
+`pskreporter-local` can run on any machine with Python 3.11 or newer and network access to PSK Reporter. It includes the Uvicorn command-line HTTP server, so a separate web-server product is optional.
 
-The commands below target Debian or Ubuntu. Adapt package names and Nginx paths for another Linux distribution.
+These examples use a POSIX-style shell. Adjust executable paths for the host's shell or operating system.
 
-## 1. Prepare the server
+## 1. Obtain and install the application
 
-Connect to the Linux host and install the required system packages:
-
-```bash
-ssh YOUR_LINUX_USER@10.176.1.6
-sudo apt update
-sudo apt install -y git nginx python3 python3-venv
-```
-
-Create a dedicated service account and clone the repository:
+Clone the repository or unpack a release, then enter the application directory:
 
 ```bash
-sudo useradd --system --home-dir /opt/pskreporter-local --shell /usr/sbin/nologin pskreporter
-sudo git clone https://github.com/kf6ufo/pskreporter-local.git /opt/pskreporter-local
-sudo chown -R pskreporter:pskreporter /opt/pskreporter-local
+git clone REPOSITORY_URL pskreporter-local
+cd pskreporter-local
 ```
 
-If the service account already exists, `useradd` will report that fact and can be skipped.
-
-## 2. Install the application
+Create a dedicated virtual environment and install the application:
 
 ```bash
-sudo -u pskreporter python3 -m venv /opt/pskreporter-local/.venv
-sudo -u pskreporter /opt/pskreporter-local/.venv/bin/python -m pip install --upgrade pip
-sudo -u pskreporter /opt/pskreporter-local/.venv/bin/pip install /opt/pskreporter-local
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install .
 ```
 
-Optionally identify yourself to the PSK Reporter operator by adding an email address to the systemd unit:
+The installation account needs write access to the application directory only for installation and updates. The running application needs read access to the installed code and configuration.
 
-```ini
-Environment=PSKR_APP_CONTACT=you@example.com
-```
+## 2. Create the configuration
 
-## 3. Install the systemd service
+Copy the supplied template:
 
 ```bash
-sudo cp /opt/pskreporter-local/deploy/pskreporter-local.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now pskreporter-local
-sudo systemctl status pskreporter-local
-curl http://127.0.0.1:8765/api/health
+cp config.example.json config.json
 ```
 
-Run exactly one application worker in this release. The five-minute cache is held in process memory, so multiple workers could independently query PSK Reporter.
+Edit `config.json` before starting the application. At minimum, replace `N0CALL` with the operator's callsign:
 
-View application logs with:
+```json
+{
+  "default_callsign": "N0CALL",
+  "app_contact": null,
+  "cache_ttl_seconds": 300,
+  "report_limit": 1000,
+  "http_timeout_seconds": 10,
+  "max_xml_bytes": 5000000,
+  "query_url": "https://retrieve.pskreporter.info/query"
+}
+```
+
+`app_contact` may be `null` or a contact email address. The remaining defaults are appropriate for the first release and normally do not need adjustment.
+
+The application looks for `config.json` in its working directory. A service manager must therefore use the directory containing this file as the process working directory. Restart the application after every configuration change.
+
+The real `config.json` is ignored by Git, preventing an operator's callsign or contact address from being committed accidentally. Keep a separate protected backup if the host's deployment process replaces the entire application directory.
+
+## 3. Start the command-line server
+
+For access only from the host itself, bind Uvicorn to the loopback interface:
 
 ```bash
-sudo journalctl -u pskreporter-local -f
+.venv/bin/python -m uvicorn pskreporter_local.app:app --host 127.0.0.1 --port 8765
 ```
 
-## 4. Configure Nginx
+Open `http://127.0.0.1:8765/` on that machine.
 
-If Nginx does not already serve a site on `10.176.1.6:80`:
+For direct access from other machines on a trusted local network, listen on all interfaces:
 
 ```bash
-sudo cp /opt/pskreporter-local/deploy/nginx-pskreporter-local.conf /etc/nginx/sites-available/pskreporter-local
-sudo ln -s /etc/nginx/sites-available/pskreporter-local /etc/nginx/sites-enabled/pskreporter-local
-sudo nginx -t
-sudo systemctl reload nginx
+.venv/bin/python -m uvicorn pskreporter_local.app:app --host 0.0.0.0 --port 8765
 ```
 
-If that address already has an Nginx site, merge the `location /` proxy settings into the existing server block instead of enabling a second block on the same address and port.
-
-From the Mac, open:
+Open the application from another machine using the server's real hostname or address:
 
 ```text
-http://10.176.1.6/
+http://SERVER_HOSTNAME_OR_ADDRESS:8765/
 ```
 
-The Linux firewall must allow TCP port 80 from the Mac's trusted LAN. The exact firewall rule depends on the server's firewall and network prefix; restrict it to the local network rather than opening it globally.
+The host firewall must permit inbound TCP traffic to the chosen port from the trusted network. `0.0.0.0` is a listening address, not an address to enter in a browser.
 
-## 5. Update an installed copy
+Do not use `python3 -m http.server`: it can serve static files but cannot run the `/api/reports` service that retrieves and normalizes PSK Reporter XML.
 
-After changes have been committed and pushed:
+## 4. Verify the installation
+
+Check the health endpoint:
 
 ```bash
-cd /opt/pskreporter-local
-sudo -u pskreporter git pull --ff-only
-sudo -u pskreporter .venv/bin/pip install .
-sudo systemctl restart pskreporter-local
-curl http://127.0.0.1:8765/api/health
+curl http://SERVER_HOSTNAME_OR_ADDRESS:8765/api/health
 ```
 
-## Direct LAN test without Nginx
+A healthy instance returns JSON containing `"status":"ok"`. Then open the main page and confirm that:
 
-For a short-lived test only, FastAPI can listen directly on every server interface:
+- the callsign from `config.json` appears in the query form;
+- a 15-minute request returns reports or a clear empty-result message; and
+- the XML request trace shows the upstream request and response.
+
+If startup reports a configuration error, validate the JSON syntax and setting names against `config.example.json`. The application deliberately rejects unknown keys and incorrectly typed values.
+
+## 5. Run the application automatically
+
+For a persistent installation, configure the platform's service manager or process supervisor with these properties:
+
+- working directory: the directory containing `config.json`;
+- command: `.venv/bin/python -m uvicorn pskreporter_local.app:app --host HOST --port PORT`;
+- worker count: exactly one;
+- restart after process failures and machine reboots; and
+- capture standard output and error in the platform's logs.
+
+Use `127.0.0.1` for `HOST` when an existing platform proxy will publish the application. Use `0.0.0.0` for direct trusted-network access. A reverse proxy is not required, and this guide does not depend on a particular proxy or service manager.
+
+The single-worker requirement matters because the five-minute PSK Reporter cache is held in process memory. Multiple workers would maintain separate caches and could repeat equivalent upstream queries.
+
+## 6. Update an installation
+
+Stop the application, preserve `config.json`, update and reinstall the code, then start it again:
 
 ```bash
-./.venv/bin/uvicorn pskreporter_local.app:app --host 0.0.0.0 --port 8765
+git pull --ff-only
+.venv/bin/python -m pip install .
 ```
 
-Then browse to `http://10.176.1.6:8765/`. Do not use this development-style command as the permanent service.
+Run the health check and a 15-minute query after every update. Because `config.json` is ignored by Git, a normal `git pull` leaves it in place.
 
-## HTTPS and private data
+## Security boundary
 
-The initial application displays public reception reports and contains no login. Before exposing it outside the trusted LAN, or before adding ADIF and QRZ data, add authentication and HTTPS. Nginx can later terminate HTTPS without changing the application URLs.
+This release has no authentication and displays public reception reports. Limit direct access to a trusted network. Add the platform's normal authentication and HTTPS controls before publishing it on the internet or before adding private ADIF, logging, or callsign-account data.

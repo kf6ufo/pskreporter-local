@@ -5,7 +5,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from pskreporter_local.app import create_app
-from pskreporter_local.models import ParsedReports, QueryDirection
+from pskreporter_local.config import Settings
+from pskreporter_local.models import ParsedReports, QueryDirection, XmlTrace
 from pskreporter_local.parser import parse_reception_reports
 from pskreporter_local.service import ReportsService
 
@@ -73,10 +74,51 @@ def test_health_and_home_page() -> None:
     assert health.json()["status"] == "ok"
     assert home.status_code == 200
     assert "PSK Reporter" in home.text
+    assert "Report time (UTC)" in home.text
+    assert "Sender grid" in home.text
+    assert "Receiver grid" in home.text
+    assert "Sender region" in home.text
+    assert "Sender DXCC" in home.text
+    assert "F (MHz)" in home.text
+    assert "Frequency (Hz)" not in home.text
+    assert 'list="callsign-history"' in home.text
+    assert '<datalist id="callsign-history">' in home.text
+    assert 'autocomplete="on"' in home.text
+    assert "Advanced query options" in home.text
+    for control_id in (
+        "upstream-mode",
+        "frequency-range",
+        "report-limit",
+        "last-sequence-number",
+        "modify",
+        "rronly",
+        "noactive",
+        "nolocator",
+        "statistics",
+    ):
+        assert f'id="{control_id}"' in home.text
+    assert '<th scope="col">Age</th>' not in home.text
     assert stylesheet.status_code == 200
 
 
-def test_lookback_options_match_psk_reporter() -> None:
+def test_browser_config_supplies_operator_default_callsign() -> None:
+    client = TestClient(
+        create_app(
+            reports_service=object(),
+            settings=Settings(default_callsign="N0CALL"),
+        )
+    )
+    with client:
+        response = client.get("/api/config")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "default_callsign": "N0CALL",
+        "report_limit": 1000,
+    }
+
+
+def test_lookback_options_match_supported_live_intervals() -> None:
     client, _ = build_client(ParsedReports(()))
     with client:
         home = client.get("/")
@@ -84,14 +126,9 @@ def test_lookback_options_match_psk_reporter() -> None:
     parser = LookbackOptionParser()
     parser.feed(home.text)
     assert parser.options == [
-        ("86400", "24 hours", False),
-        ("43200", "12 hours", False),
-        ("21600", "6 hours", False),
-        ("10800", "3 hours", False),
-        ("7200", "2 hours", False),
-        ("3600", "1 hour", True),
+        ("3600", "1 hour", False),
         ("1800", "30 minutes", False),
-        ("900", "15 minutes", False),
+        ("900", "15 minutes", True),
     ]
 
 
@@ -112,14 +149,100 @@ def test_reports_are_normalized_filtered_and_cached() -> None:
     assert first.json()["query"]["callsign"] == "KF6UFO"
     assert first.json()["query"]["directions"] == ["sent_by"]
     assert first.json()["reports"][0]["directions"] == ["sent_by"]
+    assert first.json()["reports"][1]["sender_region"] == "Colorado"
+    assert first.json()["reports"][1]["sender_dxcc"] == "United States"
     assert first.json()["xml_trace"][0]["direction"] == "sent_by"
     assert first.json()["xml_trace"][0]["cache_hit"] is False
+    assert first.json()["xml_trace"][0]["lookback_seconds"] == 3600
 
     assert second.status_code == 200
     assert second.json()["report_count"] == 1
     assert second.json()["cache_hit"] is True
     assert second.json()["reports"][0]["band"] == "20m"
     assert fake.calls == 1
+
+
+def test_advanced_query_options_are_normalized_and_returned() -> None:
+    client, fake = build_client(ParsedReports(()))
+    with client:
+        response = client.get(
+            "/api/reports?callsign=KF6UFO&lookback_seconds=900"
+            "&upstream_mode=ft8&rptlimit=75&rronly=false&noactive=false"
+            "&nolocator=false&frange=28000000-29700000&statistics=true"
+            "&modify=grid&lastseqno=12345"
+        )
+
+    assert response.status_code == 200
+    query = fake.queries[0]
+    assert query.upstream_mode == "FT8"
+    assert query.report_limit == 75
+    assert query.reception_reports_only is False
+    assert query.exclude_active_monitors is False
+    assert query.include_reports_without_locator is False
+    assert query.frequency_range == "28000000-29700000"
+    assert query.include_statistics is True
+    assert query.modify_grid is True
+    assert query.last_sequence_number == 12345
+    assert response.json()["query"] == {
+        "callsign": "KF6UFO",
+        "lookback_seconds": 900,
+        "directions": ["sent_by"],
+        "band": None,
+        "mode": None,
+        "upstream_mode": "FT8",
+        "rptlimit": 75,
+        "rronly": False,
+        "noactive": False,
+        "nolocator": False,
+        "frange": "28000000-29700000",
+        "statistics": True,
+        "modify": "grid",
+        "lastseqno": 12345,
+    }
+
+
+def test_invalid_advanced_frequency_range_has_stable_error_shape() -> None:
+    client, _ = build_client(ParsedReports(()))
+    with client:
+        response = client.get(
+            "/api/reports?callsign=KF6UFO&lookback_seconds=900"
+            "&frange=29700000-28000000"
+        )
+
+    assert response.status_code == 422
+    assert response.json()["status"] == "invalid_query"
+    assert "lowerHz-upperHz" in response.json()["message"]
+
+
+def test_filled_upstream_limit_is_reported_as_truncated() -> None:
+    parsed_fixture = parse_reception_reports((FIXTURES / "reports.xml").read_bytes())
+    parsed = ParsedReports(
+        reports=parsed_fixture.reports,
+        warnings=parsed_fixture.warnings,
+        xml_trace=XmlTrace(
+            direction="sent_by",
+            request_url="https://retrieve.pskreporter.info/query",
+            http_status=200,
+            elapsed_ms=25,
+            response_bytes=500,
+            raw_xml="<receptionReports />",
+            requested_report_limit=2,
+            report_limit_reached=True,
+        ),
+    )
+    client, _ = build_client(parsed)
+
+    with client:
+        response = client.get(
+            "/api/reports?callsign=KF6UFO&lookback_seconds=3600"
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["truncated"] is True
+    assert payload["oldest_report_utc"] == "2023-11-14T22:13:20Z"
+    assert "2-report limit" in payload["warnings"][-1]
+    assert payload["xml_trace"][0]["report_limit_reached"] is True
 
 
 def test_both_directions_make_separate_cached_queries_and_merge_reports() -> None:
@@ -176,6 +299,17 @@ def test_invalid_callsign_has_stable_error_shape() -> None:
 
     assert response.status_code == 422
     assert response.json()["status"] == "invalid_query"
+    assert fake.calls == 0
+
+
+def test_unsupported_multi_hour_lookback_is_rejected() -> None:
+    client, fake = build_client(ParsedReports(()))
+    with client:
+        response = client.get(
+            "/api/reports?callsign=KF6UFO&lookback_seconds=7200"
+        )
+
+    assert response.status_code == 422
     assert fake.calls == 0
 
 

@@ -5,6 +5,8 @@
     receiverLocator="FN42hn"
     senderCallsign="kf6ufo"
     senderLocator="DM79lt"
+    senderRegion="Colorado"
+    senderDXCC="United States"
     frequency="14074000"
     flowStartSeconds="1700000000"
     mode="ft8"
