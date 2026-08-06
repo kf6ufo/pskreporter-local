@@ -3,6 +3,7 @@ const callsignInput = document.querySelector("#callsign");
 const callsignHistoryList = document.querySelector("#callsign-history");
 const fetchButton = document.querySelector("#fetch-button");
 const lookbackSelect = document.querySelector("#lookback");
+const refreshIntervalSelect = document.querySelector("#refresh-interval");
 const sentBy = document.querySelector("#sent-by");
 const recvBy = document.querySelector("#recv-by");
 const upstreamMode = document.querySelector("#upstream-mode");
@@ -32,12 +33,17 @@ const cacheBadge = document.querySelector("#cache-badge");
 const tracePanel = document.querySelector("#xml-trace");
 const traceSummary = document.querySelector("#trace-summary");
 const traceContent = document.querySelector("#trace-content");
+const lastDisplayRefreshTime = document.querySelector("#last-display-refresh-time");
 
 let reports = [];
+let fetchInProgress = false;
+let refreshTimer = null;
 const LOOKBACK_STORAGE_KEY = "pskreporter-local.lookback-seconds";
+const REFRESH_INTERVAL_STORAGE_KEY = "pskreporter-local.refresh-interval-seconds";
 const CALLSIGN_HISTORY_STORAGE_KEY = "pskreporter-local.callsign-history";
 const MAX_CALLSIGN_HISTORY = 10;
 const MAX_LOCATION_CHARS = 22;
+const QRZ_CALLSIGN_URL = "https://www.qrz.com/db/";
 
 function renderCallsignHistory(history) {
   callsignHistoryList.replaceChildren();
@@ -200,6 +206,39 @@ function rememberLookbackPreference() {
   }
 }
 
+function restoreRefreshPreference() {
+  try {
+    const savedValue = window.localStorage.getItem(REFRESH_INTERVAL_STORAGE_KEY);
+    const validValues = [...refreshIntervalSelect.options].map((option) => option.value);
+    if (savedValue && validValues.includes(savedValue)) {
+      refreshIntervalSelect.value = savedValue;
+    }
+  } catch {
+    // The selected HTML option remains the default when storage is unavailable.
+  }
+}
+
+function scheduleAutoRefresh() {
+  if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+  const intervalMilliseconds = Number(refreshIntervalSelect.value) * 1000;
+  refreshTimer = window.setTimeout(() => {
+    refreshTimer = null;
+    void fetchReports({ automatic: true });
+  }, intervalMilliseconds);
+}
+
+function rememberRefreshPreference() {
+  try {
+    window.localStorage.setItem(
+      REFRESH_INTERVAL_STORAGE_KEY,
+      refreshIntervalSelect.value,
+    );
+  } catch {
+    // Refresh scheduling still works when browser storage is unavailable.
+  }
+  scheduleAutoRefresh();
+}
+
 function setStatus(message, kind = "") {
   statusMessage.textContent = message;
   statusMessage.className = `status-message ${kind}`.trim();
@@ -229,7 +268,7 @@ function startXmlTrace() {
   if (sentBy.checked) directions.push("Sent by");
   if (recvBy.checked) directions.push("Recv by");
 
-  tracePanel.open = true;
+  tracePanel.open = false;
   traceSummary.textContent = "Working…";
   traceContent.replaceChildren(
     textElement(
@@ -334,6 +373,22 @@ function appendTruncatedCell(row, label, value) {
   }
 }
 
+function appendQrzCallsignCell(row, label, callsign) {
+  const cell = appendCell(row, label, callsign, "call-cell");
+  if (!callsign) return cell;
+
+  const link = document.createElement("a");
+  link.className = "callsign-link";
+  link.href = `${QRZ_CALLSIGN_URL}${encodeURIComponent(callsign)}`;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.textContent = callsign;
+  link.title = `Open ${callsign} on QRZ`;
+  link.setAttribute("aria-label", `Open ${callsign} on QRZ in a new tab`);
+  cell.replaceChildren(link);
+  return cell;
+}
+
 function relationshipLabel(directions) {
   const isSentBy = directions.includes("sent_by");
   const isRecvBy = directions.includes("recv_by");
@@ -357,10 +412,10 @@ function renderReports() {
     const row = document.createElement("tr");
     appendCell(row, "Report time (UTC)", displayUtc(report.spot_time_utc));
     appendCell(row, "Direction", relationshipLabel(report.directions), "direction-cell");
-    appendCell(row, "Transmitter", report.sender_call, "call-cell");
+    appendQrzCallsignCell(row, "Sender", report.sender_call);
     appendCell(row, "Sender grid", report.sender_locator);
-    appendCell(row, "Receiver", report.receiver_call, "call-cell");
-    appendCell(row, "Receiver grid", report.receiver_locator);
+    appendQrzCallsignCell(row, "Recv", report.receiver_call);
+    appendCell(row, "Recv grid", report.receiver_locator);
     const qsoText = report.qso_count_total == null
       ? null
       : `${report.qso_count_band == null ? "—" : report.qso_count_band.toLocaleString("en-US")}/${report.qso_count_total.toLocaleString("en-US")}`;
@@ -424,8 +479,19 @@ function configureFilters() {
   filterBar.hidden = reports.length === 0;
 }
 
-async function fetchReports() {
-  if (!form.reportValidity()) return;
+async function fetchReports({ automatic = false } = {}) {
+  if (fetchInProgress) return;
+  const formIsValid = automatic ? form.checkValidity() : form.reportValidity();
+  if (!formIsValid) {
+    scheduleAutoRefresh();
+    return;
+  }
+
+  fetchInProgress = true;
+  if (refreshTimer !== null) {
+    window.clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
 
   const data = new FormData(form);
   const selectedLookback = String(data.get("lookback_seconds"));
@@ -475,6 +541,9 @@ async function fetchReports() {
       throw new Error(payload.message || "The report request failed.");
     }
 
+    const refreshedAtUtc = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+    lastDisplayRefreshTime.dateTime = refreshedAtUtc;
+    lastDisplayRefreshTime.textContent = displayUtc(refreshedAtUtc);
     reports = payload.reports;
     lastFetch.textContent = `Fetched ${displayUtc(payload.fetched_at_utc)}`;
     oldestReport.textContent = payload.oldest_report_utc
@@ -490,7 +559,7 @@ async function fetchReports() {
 
     if (payload.status === "empty") {
       resultCount.textContent = "0 reports";
-      setStatus("No reception reports were found for the selected direction and lookback period.", "empty");
+      setStatus("No reception reports were found for the selected direction and report interval.", "empty");
       return;
     }
 
@@ -510,8 +579,10 @@ async function fetchReports() {
     setStatus(error.message || "Unable to load reports.", "error");
   } finally {
     setLookbackSelection(selectedLookback);
+    fetchInProgress = false;
     fetchButton.disabled = false;
     fetchButton.querySelector("span").textContent = "Fetch reports";
+    scheduleAutoRefresh();
   }
 }
 
@@ -528,6 +599,7 @@ form.addEventListener("submit", (event) => {
 });
 fetchButton.addEventListener("click", () => void fetchReports());
 lookbackSelect.addEventListener("change", rememberLookbackPreference);
+refreshIntervalSelect.addEventListener("change", rememberRefreshPreference);
 sentBy.addEventListener("change", () => keepOneDirectionSelected(sentBy));
 recvBy.addEventListener("change", () => keepOneDirectionSelected(recvBy));
 bandFilter.addEventListener("change", renderReports);
@@ -535,6 +607,8 @@ modeFilter.addEventListener("change", renderReports);
 reloadAdifButton.addEventListener("click", () => void reloadAdif());
 
 restoreLookbackPreference();
+restoreRefreshPreference();
 loadCallsignHistory();
 void loadAppConfig();
 void loadAdifStatus();
+scheduleAutoRefresh();
