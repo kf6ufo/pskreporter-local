@@ -6,18 +6,15 @@
     <meta name="color-scheme" content="dark">
     <title>PSK Reporter + ADIF</title>
     <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/assets/styles.css">
-    <script src="/assets/app.js?v=0.3.0" defer></script>
+    <link rel="stylesheet" href="/assets/styles.css?v=0.4.4">
+    <script src="/assets/app.js?v=0.4.4" defer></script>
   </head>
   <body>
     <main class="page-shell">
       <header class="hero">
         <div>
-          <p class="eyebrow">LIVE ACTIVITY · LOG HISTORY</p>
+          <p class="eyebrow">SEE WHO’S ON THE AIR · FIND NEW CONTACTS</p>
           <h1>PSK Reporter + ADIF</h1>
-          <p class="hero-copy">
-            See who is on the air now—and whether you have worked them on this band or any band—by combining PSK Reporter reception reports with your local ADIF log.
-          </p>
         </div>
         <div class="signal-mark" aria-hidden="true">
           <span></span><span></span><span></span>
@@ -25,12 +22,13 @@
       </header>
 
       <section class="control-panel" aria-labelledby="query-heading">
-        <div class="section-heading">
-          <div>
-            <p class="section-kicker">QUERY</p>
-            <h2 id="query-heading">Reception reports</h2>
-          </div>
-          <p class="service-note">Requests are cached for at least five minutes.</p>
+        <h2 id="query-heading" class="visually-hidden">Reception report query</h2>
+        <div class="query-service-status">
+          <span>Requests are cached for at least five minutes.</span>
+          <span class="dot" aria-hidden="true"></span>
+          <span class="last-display-refresh">
+            Last display refresh: <time id="last-display-refresh-time">Not yet</time>
+          </span>
         </div>
 
         <form id="report-form" class="query-form">
@@ -52,11 +50,20 @@
           </label>
 
           <label>
-            <span>Lookback</span>
+            <span>Report interval</span>
             <select id="lookback" name="lookback_seconds">
               <option value="3600">1 hour</option>
               <option value="1800">30 minutes</option>
               <option value="900" selected>15 minutes</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Refresh interval</span>
+            <select id="refresh-interval" name="refresh_interval_seconds">
+              <option value="300">5 minutes</option>
+              <option value="600" selected>10 minutes</option>
+              <option value="900">15 minutes</option>
             </select>
           </label>
 
@@ -79,13 +86,12 @@
             <span aria-hidden="true">→</span>
           </button>
 
-          <details class="advanced-query-options">
-            <summary>
-              <span>Advanced query options</span>
-              <span>PSK Reporter XML parameters</span>
-            </summary>
+          <details class="operator-options">
+            <summary>Options</summary>
             <div class="advanced-query-body">
-              <div class="advanced-query-grid">
+              <section class="option-section" aria-labelledby="query-options-heading">
+                <h3 id="query-options-heading">Query</h3>
+                <div class="advanced-query-grid">
                 <label>
                   <span><code>mode</code></span>
                   <input
@@ -137,9 +143,9 @@
                     <option value="grid">grid — interpret call as grid</option>
                   </select>
                 </label>
-              </div>
+                </div>
 
-              <div class="advanced-flags">
+                <div class="advanced-flags">
                 <label class="advanced-flag">
                   <input id="rronly" name="rronly" type="checkbox" checked>
                   <span><code>rronly</code><small>Return reception reports only</small></span>
@@ -156,43 +162,41 @@
                   <input id="statistics" name="statistics" type="checkbox">
                   <span><code>statistics</code><small>Request statistical information</small></span>
                 </label>
-              </div>
+                </div>
 
-              <p class="advanced-query-note">
-                The primary controls set the callsign parameter and <code>flowStartSeconds</code>.
-                <code>appcontact</code> comes from <code>config.json</code>. <code>callback</code>
-                is disabled because this application requires an XML response.
-              </p>
+                <p class="advanced-query-note">
+                  The primary controls set the callsign parameter and <code>flowStartSeconds</code>.
+                  <code>appcontact</code> comes from <code>config.json</code>. <code>callback</code>
+                  is disabled because this application requires an XML response.
+                </p>
+              </section>
+
+              <section class="option-section adif-section" aria-labelledby="adif-options-heading">
+                <div class="option-section-heading">
+                  <h3 id="adif-options-heading">ADIF log</h3>
+                  <span id="adif-summary">Checking configuration…</span>
+                </div>
+                <div class="adif-body">
+                  <div class="adif-location">
+                    <span>ADI file location on this server</span>
+                    <code id="adif-path">Not configured</code>
+                  </div>
+                  <div class="adif-actions">
+                    <button id="reload-adif" type="button" disabled>Reload ADIF</button>
+                    <p id="adif-status" role="status" aria-live="polite">
+                      Set <code>adif_file_path</code> in <code>config.json</code> and restart the application.
+                    </p>
+                  </div>
+                </div>
+              </section>
             </div>
           </details>
         </form>
-
-        <details class="adif-options">
-          <summary>
-            <span>ADIF log</span>
-            <span id="adif-summary">Checking configuration…</span>
-          </summary>
-          <div class="adif-body">
-            <div class="adif-location">
-              <span>ADI file location on this server</span>
-              <code id="adif-path">Not configured</code>
-            </div>
-            <div class="adif-actions">
-              <button id="reload-adif" type="button" disabled>Reload ADIF</button>
-              <p id="adif-status" role="status" aria-live="polite">
-                Set <code>adif_file_path</code> in <code>config.json</code> and restart the application.
-              </p>
-            </div>
-          </div>
-        </details>
       </section>
 
       <section class="results-panel" aria-labelledby="results-heading">
         <div class="section-heading results-heading">
-          <div>
-            <p class="section-kicker">RESULTS</p>
-            <h2 id="results-heading">Recent reception</h2>
-          </div>
+          <h2 id="results-heading" class="results-title">Results</h2>
           <div id="fetch-meta" class="fetch-meta" hidden>
             <span id="result-count"></span>
             <span class="dot" aria-hidden="true"></span>
@@ -234,10 +238,10 @@
               <tr>
                 <th scope="col">Report time (UTC)</th>
                 <th scope="col">Direction</th>
-                <th scope="col">Transmitter</th>
+                <th scope="col">Sender</th>
                 <th scope="col">Sender grid</th>
-                <th scope="col">Receiver</th>
-                <th scope="col">Receiver grid</th>
+                <th scope="col">Recv</th>
+                <th scope="col">Recv grid</th>
                 <th scope="col" title="QSOs on this band / all bands">QSOs B/T</th>
                 <th scope="col">Sender region</th>
                 <th scope="col">Sender DXCC</th>

@@ -24,6 +24,7 @@ This is particularly useful during short openings on bands such as 6 and 10 mete
 ## Features
 
 - Query the last 15, 30, or 60 minutes, with 15 minutes as the default.
+- Automatically refresh reports every 5, 10, or 15 minutes, with 10 minutes as the default, and show the last successful display refresh in UTC.
 - Select PSK Reporter's `Sent by`, `Recv by`, or both directions.
 - Show UTC report time, transmitter and receiver callsigns, both Maidenhead grids, sender region and DXCC, frequency in transceiver-style MHz, derived amateur band, and mode.
 - Filter fetched results locally by band and mode.
@@ -141,7 +142,7 @@ The collapsed **Advanced query options** panel exposes the compatible parameters
 | `nolocator` | Enabled | Include reports that do not contain a locator. |
 | `statistics` | Disabled | Ask the upstream response to include statistical information. |
 
-The primary callsign, direction, and lookback controls produce `senderCallsign` or `receiverCallsign` and `flowStartSeconds`. `appcontact` remains an application setting in `config.json`. `callback` is intentionally unavailable because it changes the response from XML to JavaScript, which is incompatible with the parser.
+The primary callsign, direction, and report-interval controls produce `senderCallsign` or `receiverCallsign` and `flowStartSeconds`. The browser-only refresh interval controls when that query is repeated and does not change the upstream parameters. `appcontact` remains an application setting in `config.json`. `callback` is intentionally unavailable because it changes the response from XML to JavaScript, which is incompatible with the parser.
 
 Every advanced option participates in the five-minute cache key. Equivalent options reuse a cached response; changing an upstream option produces a distinct PSK Reporter request.
 

@@ -74,16 +74,39 @@ def test_health_and_home_page() -> None:
         health = client.get("/api/health")
         home = client.get("/")
         stylesheet = client.get("/assets/styles.css")
+        javascript = client.get("/assets/app.js")
 
     assert health.status_code == 200
     assert health.json()["status"] == "ok"
     assert home.status_code == 200
+    assert javascript.status_code == 200
+    assert 'const QRZ_CALLSIGN_URL = "https://www.qrz.com/db/";' in javascript.text
+    assert 'link.rel = "noopener noreferrer";' in javascript.text
+    assert 'appendQrzCallsignCell(row, "Sender", report.sender_call);' in javascript.text
+    assert 'appendQrzCallsignCell(row, "Recv", report.receiver_call);' in javascript.text
     assert "PSK Reporter + ADIF" in home.text
-    assert "LIVE ACTIVITY · LOG HISTORY" in home.text
-    assert "whether you have worked them on this band or any band" in home.text
+    assert "SEE WHO’S ON THE AIR · FIND NEW CONTACTS" in home.text
+    assert "LIVE ACTIVITY · LOG HISTORY" not in home.text
+    assert "Report interval" in home.text
+    assert "Refresh interval" in home.text
+    assert '<select id="refresh-interval" name="refresh_interval_seconds">' in home.text
+    assert '<option value="300">5 minutes</option>' in home.text
+    assert '<option value="600" selected>10 minutes</option>' in home.text
+    assert '<option value="900">15 minutes</option>' in home.text
+    assert "<span>Lookback</span>" not in home.text
+    assert "Requests are cached for at least five minutes." in home.text
+    assert 'id="last-display-refresh-time">Not yet</time>' in home.text
+    assert 'class="visually-hidden">Reception report query</h2>' in home.text
+    assert '<p class="section-kicker">QUERY</p>' not in home.text
+    assert '<h2 id="results-heading" class="results-title">Results</h2>' in home.text
+    assert "Recent reception" not in home.text
     assert "Report time (UTC)" in home.text
+    assert "<th scope=\"col\">Sender</th>" in home.text
     assert "Sender grid" in home.text
-    assert "Receiver grid" in home.text
+    assert "<th scope=\"col\">Recv</th>" in home.text
+    assert "Recv grid" in home.text
+    assert "<th scope=\"col\">Transmitter</th>" not in home.text
+    assert "Receiver grid" not in home.text
     assert "Sender region" in home.text
     assert "Sender DXCC" in home.text
     assert "F (MHz)" in home.text
@@ -92,7 +115,12 @@ def test_health_and_home_page() -> None:
     assert 'list="callsign-history"' in home.text
     assert '<datalist id="callsign-history">' in home.text
     assert 'autocomplete="on"' in home.text
-    assert "Advanced query options" in home.text
+    assert '<details class="operator-options">' in home.text
+    assert "<summary>Options</summary>" in home.text
+    assert "Advanced query options" not in home.text
+    assert "PSK Reporter XML parameters" not in home.text
+    assert '<details id="xml-trace" class="trace-panel">' in home.text
+    assert '<details id="xml-trace" class="trace-panel" open>' not in home.text
     assert "ADIF log" in home.text
     assert 'id="reload-adif"' in home.text
     for control_id in (
