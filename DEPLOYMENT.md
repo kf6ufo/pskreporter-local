@@ -70,11 +70,13 @@ For access only from the host itself, bind Uvicorn to the loopback interface:
 
 Open `http://127.0.0.1:8765/` on that machine.
 
-For direct access from other machines on a trusted local network, listen on all interfaces:
+For direct access from other machines on a trusted local network, listen on all IPv4 interfaces:
 
 ```bash
 .venv/bin/python -m uvicorn pskreporter_local.app:app --host 0.0.0.0 --port 8765
 ```
+
+The included `run.sh` for POSIX systems and `run.cmd` for Windows use the same Uvicorn options with automatic reload enabled. To make either launcher available to other station computers, edit its `--host 127.0.0.1` option to `--host 0.0.0.0`, or replace it with a specific local interface address. Then run `./run.sh` on POSIX systems or `run.cmd` from Windows Command Prompt.
 
 Open the application from another machine using the server's real hostname or address:
 

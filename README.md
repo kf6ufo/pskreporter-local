@@ -60,12 +60,21 @@ cp config.example.json config.json
 
 Edit `config.json` and replace `N0CALL` with your callsign. You may set `app_contact` to an email address or leave it as `null`.
 
-Run the tests, then start the application:
+Run the tests, then start the application on macOS or Linux:
 
 ```bash
 .venv/bin/pytest
-.venv/bin/python -m uvicorn pskreporter_local.app:app --host 127.0.0.1 --port 8765 --reload
+./run.sh
 ```
+
+On Windows Command Prompt, use:
+
+```bat
+.venv\Scripts\python -m pytest
+run.cmd
+```
+
+Both launchers run Uvicorn at `http://127.0.0.1:8765` with automatic reload enabled.
 
 Open [http://127.0.0.1:8765/](http://127.0.0.1:8765/). Interactive API documentation is available at [http://127.0.0.1:8765/api/docs](http://127.0.0.1:8765/api/docs).
 
