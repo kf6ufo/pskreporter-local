@@ -6,8 +6,8 @@
     <meta name="color-scheme" content="dark">
     <title>PSK Reporter + ADIF</title>
     <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/assets/styles.css?v=0.4.4">
-    <script src="/assets/app.js?v=0.4.4" defer></script>
+    <link rel="stylesheet" href="/assets/styles.css?v=0.4.5">
+    <script src="/assets/app.js?v=0.4.5" defer></script>
   </head>
   <body>
     <main class="page-shell">
@@ -226,6 +226,28 @@
             <span>Mode</span>
             <select id="mode-filter"><option value="">All modes</option></select>
           </label>
+          <label class="mobile-sort-control">
+            <span>Sort by</span>
+            <select id="sort-field">
+              <option value="spot_time_utc">Report time (UTC)</option>
+              <option value="direction">Direction</option>
+              <option value="sender_call">Sender</option>
+              <option value="sender_locator">Sender grid</option>
+              <option value="receiver_call">Recv</option>
+              <option value="receiver_locator">Recv grid</option>
+              <option value="qso_counts">QSOs B/T</option>
+              <option value="sender_region">Sender region</option>
+              <option value="sender_dxcc">Sender DXCC</option>
+              <option value="frequency_hz">F (MHz)</option>
+              <option value="band">Band</option>
+              <option value="mode">Mode</option>
+            </select>
+          </label>
+          <button
+            id="sort-direction"
+            class="mobile-sort-control sort-direction-button"
+            type="button"
+          >Descending ↓</button>
         </div>
 
         <div id="status-message" class="status-message" role="status" aria-live="polite">
@@ -234,20 +256,23 @@
 
         <div id="table-wrap" class="table-wrap" hidden>
           <table>
+            <caption class="visually-hidden">
+              Reception reports. Activate a column heading to change the sort order.
+            </caption>
             <thead>
               <tr>
-                <th scope="col">Report time (UTC)</th>
-                <th scope="col">Direction</th>
-                <th scope="col">Sender</th>
-                <th scope="col">Sender grid</th>
-                <th scope="col">Recv</th>
-                <th scope="col">Recv grid</th>
-                <th scope="col" title="QSOs on this band / all bands">QSOs B/T</th>
-                <th scope="col">Sender region</th>
-                <th scope="col">Sender DXCC</th>
-                <th scope="col">F (MHz)</th>
-                <th scope="col">Band</th>
-                <th scope="col">Mode</th>
+                <th scope="col" data-sort-key="spot_time_utc" aria-sort="descending"><button class="sort-button" type="button">Report time (UTC)</button></th>
+                <th scope="col" data-sort-key="direction"><button class="sort-button" type="button">Direction</button></th>
+                <th scope="col" data-sort-key="sender_call"><button class="sort-button" type="button">Sender</button></th>
+                <th scope="col" data-sort-key="sender_locator"><button class="sort-button" type="button">Sender grid</button></th>
+                <th scope="col" data-sort-key="receiver_call"><button class="sort-button" type="button">Recv</button></th>
+                <th scope="col" data-sort-key="receiver_locator"><button class="sort-button" type="button">Recv grid</button></th>
+                <th scope="col" data-sort-key="qso_counts" title="QSOs on this band / all bands"><button class="sort-button" type="button">QSOs B/T</button></th>
+                <th scope="col" data-sort-key="sender_region"><button class="sort-button" type="button">Sender region</button></th>
+                <th scope="col" data-sort-key="sender_dxcc"><button class="sort-button" type="button">Sender DXCC</button></th>
+                <th scope="col" data-sort-key="frequency_hz"><button class="sort-button" type="button">F (MHz)</button></th>
+                <th scope="col" data-sort-key="band"><button class="sort-button" type="button">Band</button></th>
+                <th scope="col" data-sort-key="mode"><button class="sort-button" type="button">Mode</button></th>
               </tr>
             </thead>
             <tbody id="report-rows"></tbody>

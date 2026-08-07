@@ -79,6 +79,7 @@ def test_health_and_home_page() -> None:
     assert health.status_code == 200
     assert health.json()["status"] == "ok"
     assert home.status_code == 200
+    assert stylesheet.status_code == 200
     assert javascript.status_code == 200
     assert 'const QRZ_CALLSIGN_URL = "https://www.qrz.com/db/";' in javascript.text
     assert 'link.rel = "noopener noreferrer";' in javascript.text
@@ -101,9 +102,17 @@ def test_health_and_home_page() -> None:
     assert '<h2 id="results-heading" class="results-title">Results</h2>' in home.text
     assert "Recent reception" not in home.text
     assert "Report time (UTC)" in home.text
-    assert "<th scope=\"col\">Sender</th>" in home.text
+    assert 'data-sort-key="spot_time_utc" aria-sort="descending"' in home.text
+    assert 'data-sort-key="sender_call"' in home.text
+    assert home.text.count('class="sort-button"') == 12
+    assert 'id="sort-field"' in home.text
+    assert 'id="sort-direction"' in home.text
+    assert "Activate a column heading to change the sort order." in home.text
+    assert "function sortedFilteredReports()" in javascript.text
+    assert "function toggleReportSort(key)" in javascript.text
+    assert 'th[aria-sort="descending"] .sort-button::after' in stylesheet.text
     assert "Sender grid" in home.text
-    assert "<th scope=\"col\">Recv</th>" in home.text
+    assert 'data-sort-key="receiver_call"' in home.text
     assert "Recv grid" in home.text
     assert "<th scope=\"col\">Transmitter</th>" not in home.text
     assert "Receiver grid" not in home.text

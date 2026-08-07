@@ -25,6 +25,9 @@ const reportRows = document.querySelector("#report-rows");
 const filterBar = document.querySelector("#filter-bar");
 const bandFilter = document.querySelector("#band-filter");
 const modeFilter = document.querySelector("#mode-filter");
+const sortFieldSelect = document.querySelector("#sort-field");
+const sortDirectionButton = document.querySelector("#sort-direction");
+const sortHeaders = document.querySelectorAll("th[data-sort-key]");
 const fetchMeta = document.querySelector("#fetch-meta");
 const resultCount = document.querySelector("#result-count");
 const lastFetch = document.querySelector("#last-fetch");
@@ -38,12 +41,52 @@ const lastDisplayRefreshTime = document.querySelector("#last-display-refresh-tim
 let reports = [];
 let fetchInProgress = false;
 let refreshTimer = null;
+let sortState = { key: "spot_time_utc", direction: "descending" };
 const LOOKBACK_STORAGE_KEY = "pskreporter-local.lookback-seconds";
 const REFRESH_INTERVAL_STORAGE_KEY = "pskreporter-local.refresh-interval-seconds";
 const CALLSIGN_HISTORY_STORAGE_KEY = "pskreporter-local.callsign-history";
 const MAX_CALLSIGN_HISTORY = 10;
 const MAX_LOCATION_CHARS = 22;
 const QRZ_CALLSIGN_URL = "https://www.qrz.com/db/";
+const SORT_COLLATOR = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "base",
+});
+const SORT_COLUMNS = {
+  spot_time_utc: {
+    label: "Report time (UTC)",
+    value: (report) => Date.parse(report.spot_time_utc),
+  },
+  direction: {
+    label: "Direction",
+    value: (report) => relationshipLabel(report.directions),
+  },
+  sender_call: { label: "Sender", value: (report) => report.sender_call },
+  sender_locator: {
+    label: "Sender grid",
+    value: (report) => report.sender_locator,
+  },
+  receiver_call: { label: "Recv", value: (report) => report.receiver_call },
+  receiver_locator: {
+    label: "Recv grid",
+    value: (report) => report.receiver_locator,
+  },
+  qso_counts: {
+    label: "QSOs B/T",
+    value: (report) => [report.qso_count_band, report.qso_count_total],
+  },
+  sender_region: {
+    label: "Sender region",
+    value: (report) => report.sender_region,
+  },
+  sender_dxcc: {
+    label: "Sender DXCC",
+    value: (report) => report.sender_dxcc,
+  },
+  frequency_hz: { label: "F (MHz)", value: (report) => report.frequency_hz },
+  band: { label: "Band", value: (report) => report.band },
+  mode: { label: "Mode", value: (report) => report.mode },
+};
 
 function renderCallsignHistory(history) {
   callsignHistoryList.replaceChildren();
@@ -404,9 +447,96 @@ function filteredReports() {
   });
 }
 
+function isMissingSortValue(value) {
+  return value == null
+    || value === ""
+    || (typeof value === "number" && Number.isNaN(value));
+}
+
+function compareSortValues(left, right) {
+  const leftIsMissing = isMissingSortValue(left);
+  const rightIsMissing = isMissingSortValue(right);
+  if (leftIsMissing || rightIsMissing) {
+    if (leftIsMissing && rightIsMissing) return 0;
+    return leftIsMissing ? 1 : -1;
+  }
+
+  const comparison = typeof left === "number" && typeof right === "number"
+    ? left - right
+    : SORT_COLLATOR.compare(String(left), String(right));
+  return sortState.direction === "ascending" ? comparison : -comparison;
+}
+
+function compareReports(left, right) {
+  const column = SORT_COLUMNS[sortState.key];
+  const leftValue = column.value(left);
+  const rightValue = column.value(right);
+  const leftValues = Array.isArray(leftValue) ? leftValue : [leftValue];
+  const rightValues = Array.isArray(rightValue) ? rightValue : [rightValue];
+
+  for (let index = 0; index < leftValues.length; index += 1) {
+    const comparison = compareSortValues(leftValues[index], rightValues[index]);
+    if (comparison !== 0) return comparison;
+  }
+  return 0;
+}
+
+function sortedFilteredReports() {
+  return filteredReports()
+    .map((report, index) => ({ report, index }))
+    .sort(
+      (left, right) => compareReports(left.report, right.report) || left.index - right.index,
+    )
+    .map(({ report }) => report);
+}
+
+function updateSortControls() {
+  const activeColumn = SORT_COLUMNS[sortState.key];
+  const nextDirection = sortState.direction === "ascending" ? "descending" : "ascending";
+
+  for (const header of sortHeaders) {
+    const isActive = header.dataset.sortKey === sortState.key;
+    if (isActive) {
+      header.setAttribute("aria-sort", sortState.direction);
+    } else {
+      header.removeAttribute("aria-sort");
+    }
+    const button = header.querySelector("button");
+    const headerKey = header.dataset.sortKey;
+    const initialDirection = headerKey === "spot_time_utc" ? "descending" : "ascending";
+    button.title = isActive
+      ? `${activeColumn.label}: sorted ${sortState.direction}; activate to sort ${nextDirection}`
+      : `${SORT_COLUMNS[headerKey].label}: activate to sort ${initialDirection}`;
+  }
+
+  sortFieldSelect.value = sortState.key;
+  sortDirectionButton.textContent = sortState.direction === "ascending"
+    ? "Ascending ↑"
+    : "Descending ↓";
+  sortDirectionButton.setAttribute(
+    "aria-label",
+    `${activeColumn.label} is sorted ${sortState.direction}; activate to sort ${nextDirection}`,
+  );
+}
+
+function setReportSort(key, direction) {
+  if (!SORT_COLUMNS[key] || !["ascending", "descending"].includes(direction)) return;
+  sortState = { key, direction };
+  updateSortControls();
+  renderReports();
+}
+
+function toggleReportSort(key) {
+  const direction = key === sortState.key
+    ? (sortState.direction === "ascending" ? "descending" : "ascending")
+    : (key === "spot_time_utc" ? "descending" : "ascending");
+  setReportSort(key, direction);
+}
+
 function renderReports() {
   reportRows.replaceChildren();
-  const visibleReports = filteredReports();
+  const visibleReports = sortedFilteredReports();
+  updateSortControls();
 
   for (const report of visibleReports) {
     const row = document.createElement("tr");
@@ -604,8 +734,22 @@ sentBy.addEventListener("change", () => keepOneDirectionSelected(sentBy));
 recvBy.addEventListener("change", () => keepOneDirectionSelected(recvBy));
 bandFilter.addEventListener("change", renderReports);
 modeFilter.addEventListener("change", renderReports);
+for (const header of sortHeaders) {
+  header.querySelector("button").addEventListener("click", () => {
+    toggleReportSort(header.dataset.sortKey);
+  });
+}
+sortFieldSelect.addEventListener("change", () => {
+  const key = sortFieldSelect.value;
+  const direction = key === sortState.key
+    ? sortState.direction
+    : (key === "spot_time_utc" ? "descending" : "ascending");
+  setReportSort(key, direction);
+});
+sortDirectionButton.addEventListener("click", () => toggleReportSort(sortState.key));
 reloadAdifButton.addEventListener("click", () => void reloadAdif());
 
+updateSortControls();
 restoreLookbackPreference();
 restoreRefreshPreference();
 loadCallsignHistory();

@@ -28,6 +28,7 @@ This is particularly useful during short openings on bands such as 6 and 10 mete
 - Select PSK Reporter's `Sent by`, `Recv by`, or both directions.
 - Show UTC report time, transmitter and receiver callsigns, both Maidenhead grids, sender region and DXCC, frequency in transceiver-style MHz, derived amateur band, and mode.
 - Filter fetched results locally by band and mode.
+- Sort every report column ascending or descending, with newest UTC report time as the default.
 - Distinguish empty results, upstream failures, and invalid XML.
 - Cache equivalent upstream queries for at least five minutes.
 - Inspect each upstream URL, response status, timing, size, parsed count, and raw XML.
