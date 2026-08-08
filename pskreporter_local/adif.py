@@ -84,12 +84,80 @@ class AdifStatus:
         }
 
 
+@dataclass(frozen=True)
+class AdifQso:
+    callsign: str
+    qso_date: str | None
+    time_on_utc: str | None
+    band: str | None
+    mode: str | None
+    submode: str | None
+    frequency_mhz: str | None
+    snr_db: str | None
+
+    def to_dict(self) -> dict[str, str | None]:
+        return {
+            "callsign": self.callsign,
+            "qso_date": self.qso_date,
+            "time_on_utc": self.time_on_utc,
+            "band": self.band,
+            "mode": self.mode,
+            "submode": self.submode,
+            "frequency_mhz": self.frequency_mhz,
+            "snr_db": self.snr_db,
+        }
+
+
+def _normalized_qso_date(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.strptime(value.strip(), "%Y%m%d")
+    except ValueError:
+        return None
+    return parsed.strftime("%Y-%m-%d")
+
+
+def _normalized_qso_time(value: str | None) -> str | None:
+    if not value:
+        return None
+    digits = value.strip().split(".", 1)[0]
+    if len(digits) == 4:
+        digits += "00"
+    try:
+        parsed = datetime.strptime(digits, "%H%M%S")
+    except ValueError:
+        return None
+    return parsed.strftime("%H:%M:%SZ")
+
+
+def _qso_from_record(record: dict[str, str]) -> AdifQso | None:
+    callsign = record.get("CALL", "").strip().upper()
+    if not callsign:
+        return None
+    return AdifQso(
+        callsign=callsign,
+        qso_date=_normalized_qso_date(record.get("QSO_DATE")),
+        time_on_utc=_normalized_qso_time(record.get("TIME_ON")),
+        band=record.get("BAND", "").strip().lower() or None,
+        mode=record.get("MODE", "").strip().upper() or None,
+        submode=record.get("SUBMODE", "").strip().upper() or None,
+        frequency_mhz=record.get("FREQ", "").strip() or None,
+        snr_db=record.get("SNR", "").strip() or None,
+    )
+
+
+def _qso_sort_key(qso: AdifQso) -> tuple[str, str]:
+    return qso.qso_date or "", qso.time_on_utc or ""
+
+
 class AdifLogService:
     def __init__(self, path: str | None) -> None:
         self.path = Path(path) if path else None
         self.records: tuple[dict[str, str], ...] = ()
         self._call_counts: dict[str, int] = {}
         self._call_band_counts: dict[tuple[str, str], int] = {}
+        self._call_qsos: dict[str, tuple[AdifQso, ...]] = {}
         self._has_loaded = False
         self.status = AdifStatus(
             status="not_configured",
@@ -117,6 +185,11 @@ class AdifLogService:
             (normalized_call, band.strip().lower()), 0
         )
         return band_count, total_count
+
+    def qsos_for(self, callsign: str) -> tuple[AdifQso, ...] | None:
+        if not self._has_loaded:
+            return None
+        return self._call_qsos.get(callsign.strip().upper(), ())
 
     def reload(self) -> AdifStatus:
         with self._lock:
@@ -162,9 +235,19 @@ class AdifLogService:
                 and (band := record.get("BAND"))
                 and band.strip()
             )
+            call_qsos: dict[str, list[AdifQso]] = {}
+            for record in records:
+                qso = _qso_from_record(record)
+                if qso is not None:
+                    call_qsos.setdefault(qso.callsign, []).append(qso)
+            sorted_call_qsos = {
+                callsign: tuple(sorted(qsos, key=_qso_sort_key, reverse=True))
+                for callsign, qsos in call_qsos.items()
+            }
             self.records = records
             self._call_counts = dict(call_counts)
             self._call_band_counts = dict(call_band_counts)
+            self._call_qsos = sorted_call_qsos
             self._has_loaded = True
             self.status = AdifStatus(
                 status="loaded",

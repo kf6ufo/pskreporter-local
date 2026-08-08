@@ -37,11 +37,27 @@ const tracePanel = document.querySelector("#xml-trace");
 const traceSummary = document.querySelector("#trace-summary");
 const traceContent = document.querySelector("#trace-content");
 const lastDisplayRefreshTime = document.querySelector("#last-display-refresh-time");
+const stationInspector = document.querySelector("#station-inspector");
+const closeInspectorButton = document.querySelector("#close-inspector");
+const inspectorCallsign = document.querySelector("#inspector-callsign");
+const inspectorQrzLink = document.querySelector("#inspector-qrz-link");
+const copyInspectorCallsignButton = document.querySelector("#copy-inspector-callsign");
+const inspectorLastSeen = document.querySelector("#inspector-last-seen");
+const inspectorLiveDetails = document.querySelector("#inspector-live-details");
+const inspectorQsoSummary = document.querySelector("#inspector-qso-summary");
+const inspectorQsoStatus = document.querySelector("#inspector-qso-status");
+const inspectorQsoTableWrap = document.querySelector("#inspector-qso-table-wrap");
+const inspectorQsoRows = document.querySelector("#inspector-qso-rows");
+const toggleAllQsosButton = document.querySelector("#toggle-all-qsos");
 
 let reports = [];
 let fetchInProgress = false;
 let refreshTimer = null;
 let sortState = { key: "spot_time_utc", direction: "descending" };
+let inspectorQsos = [];
+let inspectorShowsAllQsos = false;
+let inspectorRequestId = 0;
+const stationQsoCache = new Map();
 const LOOKBACK_STORAGE_KEY = "pskreporter-local.lookback-seconds";
 const REFRESH_INTERVAL_STORAGE_KEY = "pskreporter-local.refresh-interval-seconds";
 const CALLSIGN_HISTORY_STORAGE_KEY = "pskreporter-local.callsign-history";
@@ -83,9 +99,10 @@ const SORT_COLUMNS = {
     label: "Sender DXCC",
     value: (report) => report.sender_dxcc,
   },
-  frequency_hz: { label: "F (MHz)", value: (report) => report.frequency_hz },
+  snr_db: { label: "sNR (dB)", value: (report) => report.snr_db },
   band: { label: "Band", value: (report) => report.band },
   mode: { label: "Mode", value: (report) => report.mode },
+  frequency_hz: { label: "F (MHz)", value: (report) => report.frequency_hz },
 };
 
 function renderCallsignHistory(history) {
@@ -200,6 +217,7 @@ async function reloadAdif() {
     });
     if (!response.ok) throw new Error("Unable to reload the ADI file.");
     renderAdifStatus(await response.json());
+    stationQsoCache.clear();
   } catch (error) {
     adifSummary.textContent = "Reload failed";
     adifStatus.textContent = error.message || "Unable to reload the ADI file.";
@@ -416,10 +434,60 @@ function appendTruncatedCell(row, label, value) {
   }
 }
 
-function appendQrzCallsignCell(row, label, callsign) {
+function fallbackCopyText(text) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.readOnly = true;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  let copied = false;
+  try {
+    textarea.select();
+    textarea.setSelectionRange(0, text.length);
+    copied = document.execCommand("copy");
+  } finally {
+    textarea.remove();
+  }
+  if (!copied) throw new Error("The browser denied clipboard access.");
+}
+
+function showCopyFeedback(button, copied) {
+  const defaultText = button.dataset.defaultText || button.textContent;
+  button.dataset.defaultText = defaultText;
+  button.textContent = copied ? "Copied!" : "Copy failed";
+  button.classList.toggle("copied", copied);
+  window.setTimeout(() => {
+    if (!button.isConnected) return;
+    button.textContent = defaultText;
+    button.classList.remove("copied");
+  }, 1400);
+}
+
+async function copyCallsign(callsign, button) {
+  try {
+    if (window.isSecureContext && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(callsign);
+      } catch {
+        fallbackCopyText(callsign);
+      }
+    } else {
+      fallbackCopyText(callsign);
+    }
+    showCopyFeedback(button, true);
+  } catch {
+    showCopyFeedback(button, false);
+  }
+}
+
+function appendQrzCallsignCell(row, label, callsign, copyable = false) {
   const cell = appendCell(row, label, callsign, "call-cell");
   if (!callsign) return cell;
 
+  const contents = document.createElement("div");
+  contents.className = "call-cell-content";
   const link = document.createElement("a");
   link.className = "callsign-link";
   link.href = `${QRZ_CALLSIGN_URL}${encodeURIComponent(callsign)}`;
@@ -428,7 +496,18 @@ function appendQrzCallsignCell(row, label, callsign) {
   link.textContent = callsign;
   link.title = `Open ${callsign} on QRZ`;
   link.setAttribute("aria-label", `Open ${callsign} on QRZ in a new tab`);
-  cell.replaceChildren(link);
+  contents.appendChild(link);
+  if (copyable) {
+    const copyButton = document.createElement("button");
+    copyButton.className = "copy-callsign-button";
+    copyButton.type = "button";
+    copyButton.textContent = "Copy";
+    copyButton.title = `Copy ${callsign} to the clipboard`;
+    copyButton.setAttribute("aria-label", `Copy ${callsign} to the clipboard`);
+    copyButton.addEventListener("click", () => void copyCallsign(callsign, copyButton));
+    contents.appendChild(copyButton);
+  }
+  cell.replaceChildren(contents);
   return cell;
 }
 
@@ -437,6 +516,148 @@ function relationshipLabel(directions) {
   const isRecvBy = directions.includes("recv_by");
   if (isSentBy && isRecvBy) return "Both";
   return isRecvBy ? "Recv by" : "Sent by";
+}
+
+function inspectorDetail(label, value) {
+  const group = document.createElement("div");
+  const term = document.createElement("dt");
+  const detail = document.createElement("dd");
+  term.textContent = label;
+  detail.textContent = value ?? "—";
+  group.append(term, detail);
+  return group;
+}
+
+function stationDetailsFor(report) {
+  const otherIsSender = report.qso_call
+    && report.sender_call.toUpperCase() === report.qso_call.toUpperCase();
+  return {
+    grid: otherIsSender ? report.sender_locator : report.receiver_locator,
+    region: otherIsSender ? report.sender_region : null,
+    dxcc: otherIsSender ? report.sender_dxcc : null,
+  };
+}
+
+function renderInspectorLiveReport(report) {
+  const station = stationDetailsFor(report);
+  const frequency = report.frequency_hz == null
+    ? null
+    : `${(report.frequency_hz / 1_000_000).toFixed(3)} MHz`;
+  inspectorLiveDetails.replaceChildren(
+    inspectorDetail("Direction", relationshipLabel(report.directions)),
+    inspectorDetail("Grid", station.grid),
+    inspectorDetail("Region", station.region),
+    inspectorDetail("DXCC", station.dxcc),
+    inspectorDetail("Band", report.band),
+    inspectorDetail("Mode", report.mode),
+    inspectorDetail("sNR", report.snr_db == null ? null : `${report.snr_db} dB`),
+    inspectorDetail("Frequency", frequency),
+  );
+  inspectorLastSeen.textContent = `Last seen ${displayUtc(report.spot_time_utc)}`;
+}
+
+function formatAdifQsoTime(qso) {
+  if (!qso.qso_date) return "—";
+  return qso.time_on_utc ? `${qso.qso_date} ${qso.time_on_utc}` : qso.qso_date;
+}
+
+function renderInspectorQsoRows() {
+  inspectorQsoRows.replaceChildren();
+  const visibleQsos = inspectorShowsAllQsos ? inspectorQsos : inspectorQsos.slice(0, 10);
+  for (const qso of visibleQsos) {
+    const row = document.createElement("tr");
+    appendCell(row, "Date / time (UTC)", formatAdifQsoTime(qso));
+    appendCell(row, "sNR (dB)", qso.snr_db);
+    appendCell(row, "Band", qso.band, "band-cell");
+    const mode = qso.submode && qso.submode !== qso.mode
+      ? `${qso.mode || "—"} / ${qso.submode}`
+      : qso.mode;
+    appendCell(row, "Mode", mode, "mode-cell");
+    appendCell(row, "Frequency (MHz)", qso.frequency_mhz);
+    inspectorQsoRows.appendChild(row);
+  }
+  toggleAllQsosButton.hidden = inspectorQsos.length <= 10;
+  toggleAllQsosButton.textContent = inspectorShowsAllQsos
+    ? "Show recent 10"
+    : `Show all ${inspectorQsos.length.toLocaleString("en-US")}`;
+}
+
+function renderInspectorQsoPayload(payload, report) {
+  inspectorQsos = payload.qsos || [];
+  inspectorShowsAllQsos = false;
+  const bandCount = payload.qso_count_band == null
+    ? "—"
+    : payload.qso_count_band.toLocaleString("en-US");
+  const totalCount = payload.qso_count_total == null
+    ? "—"
+    : payload.qso_count_total.toLocaleString("en-US");
+  inspectorQsoSummary.textContent = `${bandCount} on ${report.band || "this band"} / ${totalCount} total`;
+
+  if (payload.status === "not_configured") {
+    inspectorQsoStatus.textContent = "Configure an ADI log to see contacts with this station.";
+    inspectorQsoStatus.hidden = false;
+    inspectorQsoTableWrap.hidden = true;
+    toggleAllQsosButton.hidden = true;
+    return;
+  }
+  if (inspectorQsos.length === 0) {
+    inspectorQsoStatus.textContent = payload.status === "error"
+      ? (payload.message || "The ADI log could not be read.")
+      : `No logged QSOs with ${payload.callsign}.`;
+    inspectorQsoStatus.hidden = false;
+    inspectorQsoTableWrap.hidden = true;
+    toggleAllQsosButton.hidden = true;
+    return;
+  }
+
+  inspectorQsoStatus.hidden = true;
+  inspectorQsoTableWrap.hidden = false;
+  renderInspectorQsoRows();
+}
+
+async function openStationInspector(report) {
+  const callsign = report.qso_call;
+  if (!callsign) return;
+
+  inspectorRequestId += 1;
+  const requestId = inspectorRequestId;
+  inspectorCallsign.textContent = callsign;
+  copyInspectorCallsignButton.textContent = "Copy call";
+  copyInspectorCallsignButton.dataset.defaultText = "Copy call";
+  copyInspectorCallsignButton.classList.remove("copied");
+  inspectorQrzLink.href = `${QRZ_CALLSIGN_URL}${encodeURIComponent(callsign)}`;
+  inspectorQrzLink.setAttribute("aria-label", `Open ${callsign} on QRZ in a new tab`);
+  renderInspectorLiveReport(report);
+  inspectorQsoSummary.textContent = "Loading local log…";
+  inspectorQsoStatus.textContent = "Loading local log…";
+  inspectorQsoStatus.hidden = false;
+  inspectorQsoTableWrap.hidden = true;
+  toggleAllQsosButton.hidden = true;
+  if (!stationInspector.open) stationInspector.showModal();
+
+  const cacheKey = `${callsign.toUpperCase()}|${report.band || ""}`;
+  try {
+    let payload = stationQsoCache.get(cacheKey);
+    if (!payload) {
+      const params = new URLSearchParams();
+      if (report.band) params.set("band", report.band);
+      const query = report.band ? `?${params.toString()}` : "";
+      const response = await fetch(
+        `/api/stations/${encodeURIComponent(callsign)}/qsos${query}`,
+        { headers: { Accept: "application/json" } },
+      );
+      payload = await response.json();
+      if (!response.ok) throw new Error(payload.message || "Unable to load QSO history.");
+      stationQsoCache.set(cacheKey, payload);
+    }
+    if (requestId === inspectorRequestId) renderInspectorQsoPayload(payload, report);
+  } catch (error) {
+    if (requestId !== inspectorRequestId) return;
+    inspectorQsoSummary.textContent = "Local log unavailable";
+    inspectorQsoStatus.textContent = error.message || "Unable to load QSO history.";
+    inspectorQsoStatus.hidden = false;
+    inspectorQsoTableWrap.hidden = true;
+  }
 }
 
 function filteredReports() {
@@ -542,35 +763,45 @@ function renderReports() {
     const row = document.createElement("tr");
     appendCell(row, "Report time (UTC)", displayUtc(report.spot_time_utc));
     appendCell(row, "Direction", relationshipLabel(report.directions), "direction-cell");
-    appendQrzCallsignCell(row, "Sender", report.sender_call);
+    const senderIsOtherStation = report.qso_call === report.sender_call;
+    const receiverIsOtherStation = report.qso_call === report.receiver_call;
+    appendQrzCallsignCell(row, "Sender", report.sender_call, senderIsOtherStation);
     appendCell(row, "Sender grid", report.sender_locator);
-    appendQrzCallsignCell(row, "Recv", report.receiver_call);
+    appendQrzCallsignCell(row, "Recv", report.receiver_call, receiverIsOtherStation);
     appendCell(row, "Recv grid", report.receiver_locator);
     const qsoText = report.qso_count_total == null
       ? null
       : `${report.qso_count_band == null ? "—" : report.qso_count_band.toLocaleString("en-US")}/${report.qso_count_total.toLocaleString("en-US")}`;
-    const qsoClass = report.qso_count_band > 0
-      ? "qso-cell band-worked"
-      : report.qso_count_total > 0
-        ? "qso-cell other-band-worked"
-        : "qso-cell";
-    const qsoCell = appendCell(
-      row,
-      "QSOs B/T",
-      qsoText,
-      qsoClass,
-    );
+    const isUnworked = report.qso_count_band === 0 && report.qso_count_total === 0;
+    const qsoClass = isUnworked
+      ? "qso-cell unworked-station"
+      : report.qso_count_band > 0
+        ? "qso-cell band-worked"
+        : report.qso_count_total > 0
+          ? "qso-cell other-band-worked"
+          : "qso-cell";
+    if (isUnworked) row.classList.add("unworked-station-row");
+    const qsoCell = appendCell(row, "QSOs B/T", null, qsoClass);
     if (report.qso_call) {
       const bandLabel = report.band || "this band";
-      qsoCell.title = report.qso_count_total == null
+      const qsoDescription = report.qso_count_total == null
         ? `No ADIF count available for ${report.qso_call}`
         : `${report.qso_count_band ?? 0} QSOs with ${report.qso_call} on ${bandLabel}; ${report.qso_count_total} across all bands`;
+      const button = document.createElement("button");
+      button.className = "qso-inspector-button";
+      button.type = "button";
+      button.textContent = qsoText ?? "—";
+      button.title = `${qsoDescription}. Open station inspector.`;
+      button.setAttribute("aria-label", `${qsoDescription}. Open station inspector.`);
+      button.addEventListener("click", () => void openStationInspector(report));
+      qsoCell.replaceChildren(button);
     }
     appendTruncatedCell(row, "Sender region", report.sender_region);
     appendTruncatedCell(row, "Sender DXCC", report.sender_dxcc);
-    appendCell(row, "F (MHz)", (report.frequency_hz / 1_000_000).toFixed(3));
+    appendCell(row, "sNR (dB)", report.snr_db, "snr-cell");
     appendCell(row, "Band", report.band, "band-cell");
     appendCell(row, "Mode", report.mode, "mode-cell");
+    appendCell(row, "F (MHz)", (report.frequency_hz / 1_000_000).toFixed(3));
     reportRows.appendChild(row);
   }
 
@@ -748,6 +979,17 @@ sortFieldSelect.addEventListener("change", () => {
 });
 sortDirectionButton.addEventListener("click", () => toggleReportSort(sortState.key));
 reloadAdifButton.addEventListener("click", () => void reloadAdif());
+closeInspectorButton.addEventListener("click", () => stationInspector.close());
+copyInspectorCallsignButton.addEventListener("click", () => {
+  void copyCallsign(inspectorCallsign.textContent, copyInspectorCallsignButton);
+});
+stationInspector.addEventListener("click", (event) => {
+  if (event.target === stationInspector) stationInspector.close();
+});
+toggleAllQsosButton.addEventListener("click", () => {
+  inspectorShowsAllQsos = !inspectorShowsAllQsos;
+  renderInspectorQsoRows();
+});
 
 updateSortControls();
 restoreLookbackPreference();

@@ -28,6 +28,16 @@ def _optional_text(value: str | None) -> str | None:
     return stripped or None
 
 
+def _optional_integer(value: str | None) -> int | None:
+    text = _optional_text(value)
+    if text is None:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
 def parse_reception_reports(xml: bytes) -> ParsedReports:
     try:
         root = ElementTree.fromstring(xml)
@@ -73,6 +83,7 @@ def parse_reception_reports(xml: bytes) -> ParsedReports:
                 receiver_latitude=None,
                 receiver_longitude=None,
                 frequency_hz=frequency_hz,
+                snr_db=_optional_integer(attrs.get("sNR")),
                 band=band_from_frequency(frequency_hz),
                 mode=(
                     mode.upper()

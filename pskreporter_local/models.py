@@ -110,6 +110,7 @@ class ReceptionReport:
     receiver_latitude: float | None
     receiver_longitude: float | None
     frequency_hz: int
+    snr_db: int | None
     band: str | None
     mode: str | None
 

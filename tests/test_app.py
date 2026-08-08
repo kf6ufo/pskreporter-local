@@ -83,13 +83,17 @@ def test_health_and_home_page() -> None:
     assert javascript.status_code == 200
     assert 'const QRZ_CALLSIGN_URL = "https://www.qrz.com/db/";' in javascript.text
     assert 'link.rel = "noopener noreferrer";' in javascript.text
-    assert 'appendQrzCallsignCell(row, "Sender", report.sender_call);' in javascript.text
-    assert 'appendQrzCallsignCell(row, "Recv", report.receiver_call);' in javascript.text
+    assert 'appendQrzCallsignCell(row, "Sender", report.sender_call, senderIsOtherStation);' in javascript.text
+    assert 'appendQrzCallsignCell(row, "Recv", report.receiver_call, receiverIsOtherStation);' in javascript.text
+    assert "function copyCallsign(callsign, button)" in javascript.text
+    assert 'document.execCommand("copy")' in javascript.text
     assert "PSK Reporter + ADIF" in home.text
     assert "SEE WHO’S ON THE AIR · FIND NEW CONTACTS" in home.text
     assert "LIVE ACTIVITY · LOG HISTORY" not in home.text
     assert "Report interval" in home.text
     assert "Refresh interval" in home.text
+    assert '<input id="sent-by" name="sent_by" type="checkbox" checked>' in home.text
+    assert '<input id="recv-by" name="recv_by" type="checkbox" checked>' in home.text
     assert '<select id="refresh-interval" name="refresh_interval_seconds">' in home.text
     assert '<option value="300">5 minutes</option>' in home.text
     assert '<option value="600" selected>10 minutes</option>' in home.text
@@ -104,7 +108,7 @@ def test_health_and_home_page() -> None:
     assert "Report time (UTC)" in home.text
     assert 'data-sort-key="spot_time_utc" aria-sort="descending"' in home.text
     assert 'data-sort-key="sender_call"' in home.text
-    assert home.text.count('class="sort-button"') == 12
+    assert home.text.count('class="sort-button"') == 13
     assert 'id="sort-field"' in home.text
     assert 'id="sort-direction"' in home.text
     assert "Activate a column heading to change the sort order." in home.text
@@ -118,8 +122,22 @@ def test_health_and_home_page() -> None:
     assert "Receiver grid" not in home.text
     assert "Sender region" in home.text
     assert "Sender DXCC" in home.text
+    assert "sNR (dB)" in home.text
     assert "F (MHz)" in home.text
     assert "QSOs B/T" in home.text
+    assert 'id="station-inspector"' in home.text
+    assert 'id="copy-inspector-callsign"' in home.text
+    assert "Your QSO history" in home.text
+    assert "Equipment &amp; antenna" not in home.text
+    assert "LoTW activity" not in home.text
+    assert "function openStationInspector(report)" in javascript.text
+    assert 'className = "qso-inspector-button"' in javascript.text
+    assert 'row.classList.add("unworked-station-row")' in javascript.text
+    assert ".unworked-station .qso-inspector-button" in stylesheet.text
+    assert ".station-inspector::backdrop" in stylesheet.text
+    assert ".copy-callsign-button" in stylesheet.text
+    assert home.text.index('data-sort-key="snr_db"') < home.text.index('data-sort-key="band"')
+    assert home.text.rindex('data-sort-key="frequency_hz"') > home.text.rindex('data-sort-key="mode"')
     assert "Frequency (Hz)" not in home.text
     assert 'list="callsign-history"' in home.text
     assert '<datalist id="callsign-history">' in home.text
@@ -201,6 +219,62 @@ def test_adif_status_is_nonfatal_when_no_file_is_configured() -> None:
     assert response.json()["configured"] is False
 
 
+def test_station_qso_history_returns_normalized_local_log_details(tmp_path) -> None:
+    log_path = tmp_path / "operator.adi"
+    log_path.write_text(
+        "<CALL:5>K1ABC<QSO_DATE:8>20260804<TIME_ON:6>235959"
+        "<BAND:3>10M<MODE:3>FT8<FREQ:6>28.074<EOR>"
+        "<CALL:5>K1ABC<QSO_DATE:8>20260805<TIME_ON:4>1423"
+        "<BAND:3>20M<MODE:3>FT8<FREQ:6>14.074<SNR:2>-8<EOR>",
+        encoding="utf-8",
+    )
+    client, _ = build_client(
+        ParsedReports(()), Settings(adif_file_path=str(log_path))
+    )
+
+    with client:
+        response = client.get("/api/stations/k1abc/qsos?band=10M")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "loaded"
+    assert payload["callsign"] == "K1ABC"
+    assert payload["band"] == "10m"
+    assert payload["qso_count_band"] == 1
+    assert payload["qso_count_total"] == 2
+    assert [qso["qso_date"] for qso in payload["qsos"]] == [
+        "2026-08-05",
+        "2026-08-04",
+    ]
+    assert payload["qsos"][0]["time_on_utc"] == "14:23:00Z"
+    assert payload["qsos"][0]["snr_db"] == "-8"
+
+
+def test_station_qso_history_validates_callsign() -> None:
+    client, _ = build_client(ParsedReports(()))
+
+    with client:
+        response = client.get("/api/stations/NOT-A-CALL/qsos")
+
+    assert response.status_code == 422
+    assert response.json()["status"] == "invalid_query"
+
+
+def test_station_qso_history_accepts_portable_callsigns(tmp_path) -> None:
+    log_path = tmp_path / "operator.adi"
+    log_path.write_text("<CALL:9>EA8/K1ABC<BAND:3>10M<EOR>", encoding="utf-8")
+    client, _ = build_client(
+        ParsedReports(()), Settings(adif_file_path=str(log_path))
+    )
+
+    with client:
+        response = client.get("/api/stations/EA8%2FK1ABC/qsos?band=10m")
+
+    assert response.status_code == 200
+    assert response.json()["callsign"] == "EA8/K1ABC"
+    assert response.json()["qso_count_total"] == 1
+
+
 def test_lookback_options_match_supported_live_intervals() -> None:
     client, _ = build_client(ParsedReports(()))
     with client:
@@ -238,6 +312,7 @@ def test_reports_are_normalized_filtered_and_cached() -> None:
     assert first.json()["reports"][0]["qso_count_total"] is None
     assert first.json()["reports"][1]["sender_region"] == "Colorado"
     assert first.json()["reports"][1]["sender_dxcc"] == "United States"
+    assert first.json()["reports"][1]["snr_db"] == -12
     assert first.json()["xml_trace"][0]["direction"] == "sent_by"
     assert first.json()["xml_trace"][0]["cache_hit"] is False
     assert first.json()["xml_trace"][0]["lookback_seconds"] == 3600

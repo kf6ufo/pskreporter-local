@@ -14,7 +14,7 @@ from . import __version__
 from .adif import AdifLogService
 from .client import PskReporterClient, PskReporterUnavailable
 from .config import Settings
-from .models import InvalidQuery, QueryDirection, ReportQuery
+from .models import CALLSIGN_PATTERN, InvalidQuery, QueryDirection, ReportQuery
 from .parser import InvalidPskXml
 from .service import ReportsResult, ReportsService
 
@@ -127,6 +127,43 @@ def create_app(
         service: AdifLogService = request.app.state.adif_log
         status = await asyncio.to_thread(service.reload)
         return status.to_dict()
+
+    @application.get("/api/stations/{callsign:path}/qsos")
+    async def station_qsos(
+        request: Request,
+        callsign: str,
+        band: str | None = Query(default=None, max_length=12),
+    ) -> JSONResponse:
+        normalized_call = callsign.strip().upper()
+        if not 3 <= len(normalized_call) <= 20 or not CALLSIGN_PATTERN.fullmatch(
+            normalized_call
+        ):
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "status": "invalid_query",
+                    "message": (
+                        "Callsign must be 3-20 letters, digits, or slash-separated parts."
+                    ),
+                    "qsos": [],
+                },
+            )
+
+        service: AdifLogService = request.app.state.adif_log
+        qsos = service.qsos_for(normalized_call)
+        normalized_band = band.strip().lower() if band else None
+        counts = service.qso_counts_for(normalized_call, normalized_band)
+        return JSONResponse(
+            content={
+                "status": service.status.status,
+                "message": service.status.message,
+                "callsign": normalized_call,
+                "band": normalized_band,
+                "qso_count_band": counts[0] if counts is not None else None,
+                "qso_count_total": counts[1] if counts is not None else None,
+                "qsos": [qso.to_dict() for qso in qsos] if qsos is not None else [],
+            }
+        )
 
     @application.get("/api/reports")
     async def reports(

@@ -22,6 +22,7 @@ def test_parses_reports_and_preserves_map_fields() -> None:
     assert newest.receiver_locator is None
     assert newest.mode is None
     assert newest.band == "40m"
+    assert newest.snr_db is None
 
     assert oldest.spot_time_utc == "2023-11-14T22:13:20Z"
     assert oldest.sender_call == "KF6UFO"
@@ -32,6 +33,7 @@ def test_parses_reports_and_preserves_map_fields() -> None:
     assert oldest.receiver_latitude is None
     assert oldest.receiver_longitude is None
     assert oldest.frequency_hz == 14_074_000
+    assert oldest.snr_db == -12
     assert oldest.band == "20m"
     assert oldest.mode == "FT8"
 

@@ -6,8 +6,8 @@
     <meta name="color-scheme" content="dark">
     <title>PSK Reporter + ADIF</title>
     <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/assets/styles.css?v=0.4.5">
-    <script src="/assets/app.js?v=0.4.5" defer></script>
+    <link rel="stylesheet" href="/assets/styles.css?v=0.4.8">
+    <script src="/assets/app.js?v=0.4.8" defer></script>
   </head>
   <body>
     <main class="page-shell">
@@ -75,7 +75,7 @@
                 <span>Sent by</span>
               </label>
               <label class="switch-option">
-                <input id="recv-by" name="recv_by" type="checkbox">
+                <input id="recv-by" name="recv_by" type="checkbox" checked>
                 <span>Recv by</span>
               </label>
             </div>
@@ -238,9 +238,10 @@
               <option value="qso_counts">QSOs B/T</option>
               <option value="sender_region">Sender region</option>
               <option value="sender_dxcc">Sender DXCC</option>
-              <option value="frequency_hz">F (MHz)</option>
+              <option value="snr_db">sNR (dB)</option>
               <option value="band">Band</option>
               <option value="mode">Mode</option>
+              <option value="frequency_hz">F (MHz)</option>
             </select>
           </label>
           <button
@@ -270,9 +271,10 @@
                 <th scope="col" data-sort-key="qso_counts" title="QSOs on this band / all bands"><button class="sort-button" type="button">QSOs B/T</button></th>
                 <th scope="col" data-sort-key="sender_region"><button class="sort-button" type="button">Sender region</button></th>
                 <th scope="col" data-sort-key="sender_dxcc"><button class="sort-button" type="button">Sender DXCC</button></th>
-                <th scope="col" data-sort-key="frequency_hz"><button class="sort-button" type="button">F (MHz)</button></th>
+                <th scope="col" data-sort-key="snr_db" title="Signal-to-noise ratio in decibels"><button class="sort-button" type="button">sNR (dB)</button></th>
                 <th scope="col" data-sort-key="band"><button class="sort-button" type="button">Band</button></th>
                 <th scope="col" data-sort-key="mode"><button class="sort-button" type="button">Mode</button></th>
+                <th scope="col" data-sort-key="frequency_hz"><button class="sort-button" type="button">F (MHz)</button></th>
               </tr>
             </thead>
             <tbody id="report-rows"></tbody>
@@ -285,5 +287,62 @@
         <a href="/api/docs">API documentation</a>
       </footer>
     </main>
+
+    <dialog id="station-inspector" class="station-inspector" aria-labelledby="inspector-callsign">
+      <div class="inspector-shell">
+        <header class="inspector-header">
+          <div>
+            <p class="inspector-kicker">Station inspector</p>
+            <div class="inspector-title-row">
+              <h2 id="inspector-callsign">Station</h2>
+              <button id="copy-inspector-callsign" class="copy-callsign-button inspector-copy-button" type="button">Copy call</button>
+              <a
+                id="inspector-qrz-link"
+                class="inspector-qrz-link"
+                href="https://www.qrz.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+              >View on QRZ ↗</a>
+            </div>
+          </div>
+          <button id="close-inspector" class="inspector-close" type="button" aria-label="Close station inspector">×</button>
+        </header>
+
+        <div class="inspector-content">
+          <section class="inspector-section" aria-labelledby="live-report-heading">
+            <div class="inspector-section-heading">
+              <h3 id="live-report-heading">Live report</h3>
+              <span id="inspector-last-seen" class="inspector-section-note"></span>
+            </div>
+            <dl id="inspector-live-details" class="station-detail-grid"></dl>
+          </section>
+
+          <section class="inspector-section inspector-log-section" aria-labelledby="qso-history-heading">
+            <div class="inspector-section-heading">
+              <div>
+                <h3 id="qso-history-heading">Your QSO history</h3>
+                <p id="inspector-qso-summary" class="inspector-section-note">Loading local log…</p>
+              </div>
+              <button id="toggle-all-qsos" class="secondary-button" type="button" hidden>Show all</button>
+            </div>
+            <div id="inspector-qso-status" class="inspector-empty" role="status" aria-live="polite">Loading local log…</div>
+            <div id="inspector-qso-table-wrap" class="inspector-qso-table-wrap" hidden>
+              <table class="inspector-qso-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Date / time (UTC)</th>
+                    <th scope="col">sNR (dB)</th>
+                    <th scope="col">Band</th>
+                    <th scope="col">Mode</th>
+                    <th scope="col">Frequency (MHz)</th>
+                  </tr>
+                </thead>
+                <tbody id="inspector-qso-rows"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </div>
+    </dialog>
   </body>
 </html>

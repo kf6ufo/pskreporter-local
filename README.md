@@ -25,8 +25,9 @@ This is particularly useful during short openings on bands such as 6 and 10 mete
 
 - Query the last 15, 30, or 60 minutes, with 15 minutes as the default.
 - Automatically refresh reports every 5, 10, or 15 minutes, with 10 minutes as the default, and show the last successful display refresh in UTC.
-- Select PSK Reporter's `Sent by`, `Recv by`, or both directions.
-- Show UTC report time, transmitter and receiver callsigns, both Maidenhead grids, sender region and DXCC, frequency in transceiver-style MHz, derived amateur band, and mode.
+- Select PSK Reporter's `Sent by`, `Recv by`, or both directions, with both selected initially.
+- Show UTC report time, transmitter and receiver callsigns, both Maidenhead grids, sender region and DXCC, signal-to-noise ratio, derived amateur band, mode, and frequency in transceiver-style MHz.
+- Copy the other station's callsign directly from a report row or the Station Inspector, including a fallback for browsers that restrict the modern clipboard API on local-network HTTP connections.
 - Filter fetched results locally by band and mode.
 - Sort every report column ascending or descending, with newest UTC report time as the default.
 - Distinguish empty results, upstream failures, and invalid XML.
@@ -37,6 +38,7 @@ This is particularly useful during short openings on bands such as 6 and 10 mete
 - Expose compatible PSK Reporter XML parameters in an expandable advanced-query panel.
 - Load an operator-selected `.adi` or `.adif` log into memory and reload it manually.
 - Compare every live report with that log and show current-band/all-band QSO counts for the other station.
+- Click or tap a **QSOs B/T** count to inspect the station's live report details and its individual contacts from your local ADIF log.
 
 ## Requirements
 
@@ -127,6 +129,12 @@ Relative paths are resolved from the directory containing `config.json`. Absolut
 The application reads the file at startup and stores its parsed QSO records plus a callsign-count index in memory—no database is used. The expandable **ADIF log** section displays the resolved path, load state, QSO count, file modification time, and a **Reload ADIF** button. Reload reads the file again after logging software changes it; automatic file watching is intentionally deferred.
 
 When an ADI log is loaded, the report table's **QSOs B/T** column shows `band/total` logged contacts with the other station. For a `Sent by` report this is the receiver; for a `Recv by` report it is the sender. For example, `0/1` means no QSO on the report's current band and one QSO on another band; `2/5` means two on the current band and five across all bands; and `0/0` means the callsign has not been worked. An em dash means no usable ADI log has been loaded. Counts are case-insensitive but otherwise require an exact ADIF `CALL` match, and the band count uses the record's ADIF `BAND` field.
+
+Click or tap any **QSOs B/T** value to open the Station Inspector. It combines the selected live report—direction, grid, location, time, sNR, band, mode, and frequency—with the station's individual logged QSOs, newest first. The first 10 contacts are shown initially, with a control to reveal the complete history. QSO date, UTC time, sNR, band, mode/submode, and frequency are read from the corresponding ADIF fields when present. No external station-profile service is queried.
+
+Live signal reports use PSK Reporter's `sNR` XML attribute. Historical signal reports use the ADIF record's `SNR` field. Many logging programs do not export historical SNR, so an em dash in that column is normal.
+
+Confirmed `0/0` stations—those with no matching QSO anywhere in the loaded ADIF log—receive a bright blue opportunity badge and row highlight. This treatment is not applied when the log is unavailable, so an em dash is never mistaken for a confirmed unworked station.
 
 The path is on the machine running the Python service. If the browser and service are on different machines, copy, synchronize, or mount the ADI file where the service can read it. A missing file, permissions problem, or parse error is reported in the ADIF section without stopping PSK Reporter queries.
 

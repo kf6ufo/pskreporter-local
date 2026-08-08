@@ -8,6 +8,7 @@
     senderRegion="Colorado"
     senderDXCC="United States"
     frequency="14074000"
+    sNR="-12"
     flowStartSeconds="1700000000"
     mode="ft8"
     futureAttribute="ignored" />
