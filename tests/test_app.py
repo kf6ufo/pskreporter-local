@@ -136,7 +136,7 @@ def test_health_and_home_page() -> None:
     assert ".unworked-station .qso-inspector-button" in stylesheet.text
     assert ".station-inspector::backdrop" in stylesheet.text
     assert ".copy-callsign-button" in stylesheet.text
-    assert home.text.index('data-sort-key="snr_db"') < home.text.index('data-sort-key="band"')
+    assert home.text.index('data-sort-key="band"') < home.text.index('data-sort-key="snr_db"')
     assert home.text.rindex('data-sort-key="frequency_hz"') > home.text.rindex('data-sort-key="mode"')
     assert "Frequency (Hz)" not in home.text
     assert 'list="callsign-history"' in home.text

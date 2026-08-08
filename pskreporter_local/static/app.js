@@ -99,8 +99,8 @@ const SORT_COLUMNS = {
     label: "Sender DXCC",
     value: (report) => report.sender_dxcc,
   },
-  snr_db: { label: "sNR (dB)", value: (report) => report.snr_db },
   band: { label: "Band", value: (report) => report.band },
+  snr_db: { label: "sNR (dB)", value: (report) => report.snr_db },
   mode: { label: "Mode", value: (report) => report.mode },
   frequency_hz: { label: "F (MHz)", value: (report) => report.frequency_hz },
 };
@@ -567,8 +567,8 @@ function renderInspectorQsoRows() {
   for (const qso of visibleQsos) {
     const row = document.createElement("tr");
     appendCell(row, "Date / time (UTC)", formatAdifQsoTime(qso));
-    appendCell(row, "sNR (dB)", qso.snr_db);
     appendCell(row, "Band", qso.band, "band-cell");
+    appendCell(row, "sNR (dB)", qso.snr_db);
     const mode = qso.submode && qso.submode !== qso.mode
       ? `${qso.mode || "—"} / ${qso.submode}`
       : qso.mode;
@@ -798,8 +798,8 @@ function renderReports() {
     }
     appendTruncatedCell(row, "Sender region", report.sender_region);
     appendTruncatedCell(row, "Sender DXCC", report.sender_dxcc);
-    appendCell(row, "sNR (dB)", report.snr_db, "snr-cell");
     appendCell(row, "Band", report.band, "band-cell");
+    appendCell(row, "sNR (dB)", report.snr_db, "snr-cell");
     appendCell(row, "Mode", report.mode, "mode-cell");
     appendCell(row, "F (MHz)", (report.frequency_hz / 1_000_000).toFixed(3));
     reportRows.appendChild(row);
