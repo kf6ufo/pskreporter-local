@@ -14,6 +14,7 @@ from . import __version__
 from .adif import AdifLogService
 from .client import PskReporterClient, PskReporterUnavailable
 from .config import Settings
+from .maidenhead import maidenhead_center
 from .models import CALLSIGN_PATTERN, InvalidQuery, QueryDirection, ReportQuery
 from .parser import InvalidPskXml
 from .service import ReportsResult, ReportsService
@@ -63,6 +64,17 @@ def _other_station(report: dict[str, object], operator_call: str) -> str | None:
     if receiver_call == operator_call and sender_call != operator_call:
         return sender_call
     return None
+
+
+def _other_locator(report: dict[str, object], operator_call: str) -> str | None:
+    sender_call = str(report["sender_call"]).upper()
+    receiver_call = str(report["receiver_call"]).upper()
+    locator: object | None = None
+    if sender_call == operator_call and receiver_call != operator_call:
+        locator = report.get("receiver_locator")
+    elif receiver_call == operator_call and sender_call != operator_call:
+        locator = report.get("sender_locator")
+    return str(locator) if locator else None
 
 
 def create_app(
@@ -297,7 +309,12 @@ def create_app(
         operator_call = queries[0].callsign
         for report in merged.values():
             qso_call = _other_station(report, operator_call)
+            qso_locator = _other_locator(report, operator_call)
+            qso_center = maidenhead_center(qso_locator)
             report["qso_call"] = qso_call
+            report["qso_locator"] = qso_locator
+            report["qso_latitude"] = qso_center.latitude if qso_center else None
+            report["qso_longitude"] = qso_center.longitude if qso_center else None
             report_band = str(report["band"]) if report["band"] is not None else None
             counts = adif_service.qso_counts_for(qso_call, report_band) if qso_call else None
             report["qso_count_band"] = counts[0] if counts is not None else None

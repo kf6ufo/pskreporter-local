@@ -1,6 +1,6 @@
 # Deployment
 
-`pskreporter-local` can run on any machine with Python 3.11 or newer and network access to PSK Reporter. It includes the Uvicorn command-line HTTP server, so a separate web-server product is optional.
+`pskreporter-local` can run on any machine with Python 3.11 or newer and network access to PSK Reporter. Map view additionally loads OpenStreetMap tiles in the operator's browser. The application includes the Uvicorn command-line HTTP server, so a separate web-server product is optional.
 
 These examples use a POSIX-style shell. Adjust executable paths for the host's shell or operating system.
 
@@ -101,6 +101,7 @@ A healthy instance returns JSON containing `"status":"ok"`. Then open the main p
 - the callsign from `config.json` appears in the query form;
 - the ADIF section shows the configured path and QSO count, when enabled;
 - a 15-minute request returns reports or a clear empty-result message; and
+- Map view plots reports with usable station locators, reports omitted locators in its summary, and opens the Station Inspector when a marker is selected; and
 - the XML request trace shows the upstream request and response.
 
 If startup reports a configuration error, validate the JSON syntax and setting names against `config.example.json`. The application deliberately rejects unknown keys and incorrectly typed values.
@@ -133,3 +134,5 @@ Run the health check and a 15-minute query after every update. Because `config.j
 ## Security boundary
 
 This release has no authentication. Reception reports are public, but the configured ADIF path, file metadata, and QSO count are operator data. Limit access to a trusted network and add the platform's normal authentication and HTTPS controls before publishing the application on the internet.
+
+The application code and ADIF processing remain local. Opening Map view causes each browser to request base-map tiles directly from `tile.openstreetmap.org`; deployments with restrictive outbound filtering must permit that host or use Table view.

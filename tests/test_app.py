@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from html.parser import HTMLParser
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from pskreporter_local.app import create_app
@@ -75,12 +76,20 @@ def test_health_and_home_page() -> None:
         home = client.get("/")
         stylesheet = client.get("/assets/styles.css")
         javascript = client.get("/assets/app.js")
+        leaflet_stylesheet = client.get("/assets/vendor/leaflet-1.9.4.css")
+        leaflet_javascript = client.get("/assets/vendor/leaflet-1.9.4.js")
+        cluster_javascript = client.get(
+            "/assets/vendor/leaflet.markercluster-1.4.1.js"
+        )
 
     assert health.status_code == 200
     assert health.json()["status"] == "ok"
     assert home.status_code == 200
     assert stylesheet.status_code == 200
     assert javascript.status_code == 200
+    assert leaflet_stylesheet.status_code == 200
+    assert leaflet_javascript.status_code == 200
+    assert cluster_javascript.status_code == 200
     assert 'const QRZ_CALLSIGN_URL = "https://www.qrz.com/db/";' in javascript.text
     assert 'link.rel = "noopener noreferrer";' in javascript.text
     assert 'appendQrzCallsignCell(row, "Sender", report.sender_call, senderIsOtherStation);' in javascript.text
@@ -89,6 +98,9 @@ def test_health_and_home_page() -> None:
     assert 'document.execCommand("copy")' in javascript.text
     assert "PSK Reporter + ADIF" in home.text
     assert "SEE WHO’S ON THE AIR · FIND NEW CONTACTS" in home.text
+    assert '<details id="station-query-panel" class="station-query-panel" open>' in home.text
+    assert "Station &amp; Query" in home.text
+    assert 'id="station-query-summary-context"' in home.text
     assert "LIVE ACTIVITY · LOG HISTORY" not in home.text
     assert "Report interval" in home.text
     assert "Refresh interval" in home.text
@@ -104,6 +116,16 @@ def test_health_and_home_page() -> None:
     assert 'class="visually-hidden">Reception report query</h2>' in home.text
     assert '<p class="section-kicker">QUERY</p>' not in home.text
     assert '<h2 id="results-heading" class="results-title">Results</h2>' in home.text
+    assert 'id="table-view-button"' in home.text
+    assert 'id="map-view-button"' in home.text
+    assert 'id="report-map"' in home.text
+    assert 'id="map-summary"' in home.text
+    assert 'id="clustered-map-button"' in home.text
+    assert 'id="individual-map-button"' in home.text
+    assert 'aria-label="Map marker display"' in home.text
+    assert 'aria-label="Map marker legend"' in home.text
+    assert '/assets/vendor/leaflet-1.9.4.js' in home.text
+    assert '/assets/vendor/leaflet.markercluster-1.4.1.js' in home.text
     assert "Recent reception" not in home.text
     assert "Report time (UTC)" in home.text
     assert 'data-sort-key="spot_time_utc" aria-sort="descending"' in home.text
@@ -114,6 +136,22 @@ def test_health_and_home_page() -> None:
     assert "Activate a column heading to change the sort order." in home.text
     assert "function sortedFilteredReports()" in javascript.text
     assert "function toggleReportSort(key)" in javascript.text
+    assert "function groupedMapStations(visibleReports)" in javascript.text
+    assert "function renderReportMap(visibleReports)" in javascript.text
+    assert "function individualStationPositions(stations)" in javascript.text
+    assert "function setMapMarkerMode(mode" in javascript.text
+    assert 'const MAP_MARKER_MODE_STORAGE_KEY = "pskreporter-local.map-marker-mode";' in javascript.text
+    assert 'MAP_OPPORTUNITY_RANK[station.state] * 10_000' in javascript.text
+    assert "let mapNeedsInitialFit = true;" in javascript.text
+    assert javascript.text.count("mapNeedsInitialFit = true") == 1
+    assert "if (!mapNeedsInitialFit) return;" in javascript.text
+    assert "mapShouldFit" not in javascript.text
+    assert "const hasCurrentResults = reports.length > 0;" in javascript.text
+    assert 'resultsPanel.setAttribute("aria-busy", "true");' in javascript.text
+    assert 'resultsPanel.removeAttribute("aria-busy");' in javascript.text
+    assert "Refresh failed; continuing to show the previous results." in javascript.text
+    assert "\n    reports = [];" not in javascript.text
+    assert 'marker.on("click", () => void openStationInspector(report));' in javascript.text
     assert 'th[aria-sort="descending"] .sort-button::after' in stylesheet.text
     assert "Sender grid" in home.text
     assert 'data-sort-key="receiver_call"' in home.text
@@ -148,6 +186,14 @@ def test_health_and_home_page() -> None:
     assert "PSK Reporter XML parameters" not in home.text
     assert '<details id="xml-trace" class="trace-panel">' in home.text
     assert '<details id="xml-trace" class="trace-panel" open>' not in home.text
+    assert '<details id="results-options-panel" class="results-options-panel">' in home.text
+    assert "Filters &amp; Request Details" in home.text
+    assert 'id="results-options-summary-context"' in home.text
+    assert "function updateStationQuerySummary()" in javascript.text
+    assert "function updateResultsOptionsSummary()" in javascript.text
+    assert "stationQueryPanel.open = false;" in javascript.text
+    assert "queryPanelHasAutoCollapsed = true;" in javascript.text
+    assert "focusWasInsideQueryPanel" in javascript.text
     assert "ADIF log" in home.text
     assert 'id="reload-adif"' in home.text
     for control_id in (
@@ -307,12 +353,18 @@ def test_reports_are_normalized_filtered_and_cached() -> None:
     assert first.json()["query"]["directions"] == ["sent_by"]
     assert first.json()["reports"][0]["directions"] == ["sent_by"]
     assert first.json()["reports"][0]["qso_call"] == "N0RX"
+    assert first.json()["reports"][0]["qso_locator"] is None
+    assert first.json()["reports"][0]["qso_latitude"] is None
+    assert first.json()["reports"][0]["qso_longitude"] is None
     assert first.json()["reports"][0]["qso_count"] is None
     assert first.json()["reports"][0]["qso_count_band"] is None
     assert first.json()["reports"][0]["qso_count_total"] is None
     assert first.json()["reports"][1]["sender_region"] == "Colorado"
     assert first.json()["reports"][1]["sender_dxcc"] == "United States"
     assert first.json()["reports"][1]["snr_db"] == -12
+    assert first.json()["reports"][1]["qso_locator"] == "FN42hn"
+    assert first.json()["reports"][1]["qso_latitude"] == pytest.approx(42.5625)
+    assert first.json()["reports"][1]["qso_longitude"] == pytest.approx(-71.375)
     assert first.json()["xml_trace"][0]["direction"] == "sent_by"
     assert first.json()["xml_trace"][0]["cache_hit"] is False
     assert first.json()["xml_trace"][0]["lookback_seconds"] == 3600
@@ -329,9 +381,11 @@ def test_qso_count_follows_the_other_station_in_both_directions(tmp_path) -> Non
         b"""<?xml version="1.0"?>
         <receptionReports>
           <receptionReport receiverCallsign="W1RX" senderCallsign="KF6UFO"
-            frequency="28074000" flowStartSeconds="1700000000" mode="FT8" />
+            receiverLocator="FN42hn" frequency="28074000"
+            flowStartSeconds="1700000000" mode="FT8" />
           <receptionReport receiverCallsign="KF6UFO" senderCallsign="K1ABC"
-            frequency="28074000" flowStartSeconds="1700000060" mode="FT8" />
+            senderLocator="DM79lt" frequency="28074000"
+            flowStartSeconds="1700000060" mode="FT8" />
         </receptionReports>"""
     )
     log_path = tmp_path / "operator.adi"
@@ -359,10 +413,14 @@ def test_qso_count_follows_the_other_station_in_both_directions(tmp_path) -> Non
     sent_report = reports[("KF6UFO", "W1RX")]
     received_report = reports[("K1ABC", "KF6UFO")]
     assert sent_report["qso_call"] == "W1RX"
+    assert sent_report["qso_locator"] == "FN42hn"
+    assert sent_report["qso_latitude"] == pytest.approx(42.5625)
     assert sent_report["qso_count_band"] == 1
     assert sent_report["qso_count_total"] == 2
     assert sent_report["qso_count"] == 2
     assert received_report["qso_call"] == "K1ABC"
+    assert received_report["qso_locator"] == "DM79lt"
+    assert received_report["qso_longitude"] == pytest.approx(-105.0416666667)
     assert received_report["qso_count_band"] == 2
     assert received_report["qso_count_total"] == 3
     assert received_report["qso_count"] == 3

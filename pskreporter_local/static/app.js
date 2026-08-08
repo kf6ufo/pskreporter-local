@@ -15,14 +15,27 @@ const receptionReportsOnly = document.querySelector("#rronly");
 const excludeActiveMonitors = document.querySelector("#noactive");
 const includeWithoutLocator = document.querySelector("#nolocator");
 const includeStatistics = document.querySelector("#statistics");
+const stationQueryPanel = document.querySelector("#station-query-panel");
+const stationQuerySummary = stationQueryPanel.querySelector("summary");
+const stationQuerySummaryContext = document.querySelector("#station-query-summary-context");
 const adifSummary = document.querySelector("#adif-summary");
 const adifPath = document.querySelector("#adif-path");
 const adifStatus = document.querySelector("#adif-status");
 const reloadAdifButton = document.querySelector("#reload-adif");
 const statusMessage = document.querySelector("#status-message");
+const resultsPanel = document.querySelector(".results-panel");
 const tableWrap = document.querySelector("#table-wrap");
 const reportRows = document.querySelector("#report-rows");
+const tableViewButton = document.querySelector("#table-view-button");
+const mapViewButton = document.querySelector("#map-view-button");
+const mapWrap = document.querySelector("#map-wrap");
+const reportMapElement = document.querySelector("#report-map");
+const mapSummary = document.querySelector("#map-summary");
+const mapEmpty = document.querySelector("#map-empty");
+const clusteredMapButton = document.querySelector("#clustered-map-button");
+const individualMapButton = document.querySelector("#individual-map-button");
 const filterBar = document.querySelector("#filter-bar");
+const resultsOptionsSummaryContext = document.querySelector("#results-options-summary-context");
 const bandFilter = document.querySelector("#band-filter");
 const modeFilter = document.querySelector("#mode-filter");
 const sortFieldSelect = document.querySelector("#sort-field");
@@ -54,6 +67,14 @@ let reports = [];
 let fetchInProgress = false;
 let refreshTimer = null;
 let sortState = { key: "spot_time_utc", direction: "descending" };
+let activeResultsView = "table";
+let reportMap = null;
+let reportMarkerLayer = null;
+let reportMarkerLayerMode = null;
+let mapNeedsInitialFit = true;
+let mapTilesUnavailable = false;
+let mapMarkerMode = "clustered";
+let queryPanelHasAutoCollapsed = false;
 let inspectorQsos = [];
 let inspectorShowsAllQsos = false;
 let inspectorRequestId = 0;
@@ -61,9 +82,24 @@ const stationQsoCache = new Map();
 const LOOKBACK_STORAGE_KEY = "pskreporter-local.lookback-seconds";
 const REFRESH_INTERVAL_STORAGE_KEY = "pskreporter-local.refresh-interval-seconds";
 const CALLSIGN_HISTORY_STORAGE_KEY = "pskreporter-local.callsign-history";
+const MAP_MARKER_MODE_STORAGE_KEY = "pskreporter-local.map-marker-mode";
 const MAX_CALLSIGN_HISTORY = 10;
 const MAX_LOCATION_CHARS = 22;
 const QRZ_CALLSIGN_URL = "https://www.qrz.com/db/";
+const MAP_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+const MAP_TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>';
+const MAP_OPPORTUNITY_RANK = {
+  unknown: 0,
+  worked: 1,
+  "other-band": 2,
+  unworked: 3,
+};
+const MAP_OPPORTUNITY_LABEL = {
+  unknown: "Local log unavailable",
+  worked: "Worked on this band",
+  "other-band": "New on this band",
+  unworked: "Unworked (0/0)",
+};
 const SORT_COLLATOR = new Intl.Collator(undefined, {
   numeric: true,
   sensitivity: "base",
@@ -160,6 +196,7 @@ async function loadAppConfig() {
     if (config.report_limit) {
       reportLimit.value = String(config.report_limit);
     }
+    updateStationQuerySummary();
   } catch {
     // Configuration is optional; operators can always enter a callsign manually.
   }
@@ -298,6 +335,35 @@ function rememberRefreshPreference() {
     // Refresh scheduling still works when browser storage is unavailable.
   }
   scheduleAutoRefresh();
+}
+
+function selectedOptionLabel(select) {
+  return select.selectedOptions[0]?.textContent?.trim() || select.value;
+}
+
+function updateStationQuerySummary() {
+  const callsign = callsignInput.value.trim().toUpperCase() || "Enter a callsign";
+  const direction = sentBy.checked && recvBy.checked
+    ? "Both directions"
+    : recvBy.checked
+      ? "Recv by"
+      : "Sent by";
+  stationQuerySummaryContext.textContent = [
+    callsign,
+    direction,
+    selectedOptionLabel(lookbackSelect),
+    `Auto ${selectedOptionLabel(refreshIntervalSelect)}`,
+  ].join(" · ");
+}
+
+function updateResultsOptionsSummary() {
+  const band = bandFilter.value || "All bands";
+  const mode = modeFilter.value || "All modes";
+  const sortLabel = sortState.key === "spot_time_utc"
+    ? "UTC"
+    : SORT_COLUMNS[sortState.key].label;
+  const sortArrow = sortState.direction === "ascending" ? "↑" : "↓";
+  resultsOptionsSummaryContext.textContent = `${band} · ${mode} · ${sortLabel} ${sortArrow}`;
 }
 
 function setStatus(message, kind = "") {
@@ -516,6 +582,353 @@ function relationshipLabel(directions) {
   const isRecvBy = directions.includes("recv_by");
   if (isSentBy && isRecvBy) return "Both";
   return isRecvBy ? "Recv by" : "Sent by";
+}
+
+function opportunityState(report) {
+  if (report.qso_count_total == null) return "unknown";
+  if (report.qso_count_total === 0) return "unworked";
+  if (report.qso_count_band === 0) return "other-band";
+  return "worked";
+}
+
+function groupedMapStations(visibleReports) {
+  const groups = new Map();
+  let missingReportCount = 0;
+  for (const report of visibleReports) {
+    if (
+      !report.qso_call
+      || !report.qso_locator
+      || !Number.isFinite(report.qso_latitude)
+      || !Number.isFinite(report.qso_longitude)
+    ) {
+      missingReportCount += 1;
+      continue;
+    }
+
+    const key = `${report.qso_call.toUpperCase()}|${report.qso_locator.toUpperCase()}`;
+    const state = opportunityState(report);
+    const previous = groups.get(key);
+    if (!previous) {
+      groups.set(key, { report, state, reportCount: 1 });
+      continue;
+    }
+
+    previous.reportCount += 1;
+    const previousRank = MAP_OPPORTUNITY_RANK[previous.state];
+    const currentRank = MAP_OPPORTUNITY_RANK[state];
+    const currentIsNewer = Date.parse(report.spot_time_utc)
+      > Date.parse(previous.report.spot_time_utc);
+    if (currentRank > previousRank || (currentRank === previousRank && currentIsNewer)) {
+      previous.report = report;
+      previous.state = state;
+    }
+  }
+  return { stations: [...groups.values()], missingReportCount };
+}
+
+function markerTooltip(station) {
+  const report = station.report;
+  const tooltip = document.createElement("div");
+  tooltip.className = "station-map-tooltip";
+  tooltip.appendChild(textElement("strong", report.qso_call));
+  tooltip.appendChild(
+    textElement(
+      "span",
+      [report.qso_locator, report.band, report.mode].filter(Boolean).join(" · "),
+    ),
+  );
+  tooltip.appendChild(textElement("small", MAP_OPPORTUNITY_LABEL[station.state]));
+  if (station.reportCount > 1) {
+    tooltip.appendChild(
+      textElement(
+        "small",
+        `${station.reportCount.toLocaleString("en-US")} visible reports`,
+      ),
+    );
+  }
+  return tooltip;
+}
+
+function stationMarkerIcon(state) {
+  return window.L.divIcon({
+    className: "station-marker-icon",
+    html: `<span class="station-map-marker ${state}" aria-hidden="true"></span>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+  });
+}
+
+function clusterOpportunityState(cluster) {
+  let bestState = "unknown";
+  for (const marker of cluster.getAllChildMarkers()) {
+    const state = marker.options.stationOpportunity || "unknown";
+    if (MAP_OPPORTUNITY_RANK[state] > MAP_OPPORTUNITY_RANK[bestState]) {
+      bestState = state;
+    }
+  }
+  return bestState;
+}
+
+function clusterIcon(cluster) {
+  const count = cluster.getChildCount();
+  const state = clusterOpportunityState(cluster);
+  const size = count < 10 ? 38 : count < 100 ? 44 : 50;
+  return window.L.divIcon({
+    className: "station-cluster-icon",
+    html: `<span class="station-map-cluster ${state}">${count.toLocaleString("en-US")}</span>`,
+    iconSize: [size, size],
+  });
+}
+
+function locatorCellDimensions(locator) {
+  const precision = locator?.trim().length;
+  if (precision === 2) return { latitude: 10, longitude: 20 };
+  if (precision === 4) return { latitude: 1, longitude: 2 };
+  if (precision === 6) return { latitude: 1 / 24, longitude: 1 / 12 };
+  if (precision === 8) return { latitude: 1 / 240, longitude: 1 / 120 };
+  return { latitude: 0, longitude: 0 };
+}
+
+function individualStationPositions(stations) {
+  const collisionGroups = new Map();
+  for (const station of stations) {
+    const report = station.report;
+    const key = `${report.qso_latitude.toFixed(8)}|${report.qso_longitude.toFixed(8)}`;
+    if (!collisionGroups.has(key)) collisionGroups.set(key, []);
+    collisionGroups.get(key).push(station);
+  }
+
+  const positions = new Map();
+  for (const group of collisionGroups.values()) {
+    group.sort((left, right) => (
+      MAP_OPPORTUNITY_RANK[right.state] - MAP_OPPORTUNITY_RANK[left.state]
+      || SORT_COLLATOR.compare(left.report.qso_call, right.report.qso_call)
+      || SORT_COLLATOR.compare(left.report.qso_locator, right.report.qso_locator)
+    ));
+    for (let index = 0; index < group.length; index += 1) {
+      const station = group[index];
+      const report = station.report;
+      if (index === 0) {
+        positions.set(station, [report.qso_latitude, report.qso_longitude]);
+        continue;
+      }
+
+      let ring = 1;
+      let slot = index - 1;
+      while (slot >= ring * 6) {
+        slot -= ring * 6;
+        ring += 1;
+      }
+      const slotsInRing = ring * 6;
+      const angle = (2 * Math.PI * slot) / slotsInRing - Math.PI / 2;
+      const radius = Math.min(0.42, 0.1 + ring * 0.07);
+      const cell = locatorCellDimensions(report.qso_locator);
+      positions.set(station, [
+        report.qso_latitude + Math.sin(angle) * cell.latitude * radius,
+        report.qso_longitude + Math.cos(angle) * cell.longitude * radius,
+      ]);
+    }
+  }
+  return positions;
+}
+
+function createReportMarkerLayer() {
+  reportMarkerLayerMode = mapMarkerMode;
+  if (mapMarkerMode === "clustered" && typeof window.L.markerClusterGroup === "function") {
+    return window.L.markerClusterGroup({
+      chunkedLoading: true,
+      iconCreateFunction: clusterIcon,
+      maxClusterRadius: 46,
+      showCoverageOnHover: false,
+      spiderfyOnMaxZoom: true,
+    });
+  }
+  return window.L.layerGroup();
+}
+
+function prepareReportMarkerLayer() {
+  if (reportMarkerLayer && reportMarkerLayerMode === mapMarkerMode) {
+    reportMarkerLayer.clearLayers();
+    return;
+  }
+  if (reportMarkerLayer) reportMap.removeLayer(reportMarkerLayer);
+  reportMarkerLayer = createReportMarkerLayer();
+  reportMarkerLayer.addTo(reportMap);
+}
+
+function ensureReportMap() {
+  if (reportMap) return true;
+  if (!window.L) return false;
+
+  reportMap = window.L.map(reportMapElement, {
+    center: [20, 0],
+    zoom: 2,
+    minZoom: 2,
+    worldCopyJump: true,
+  });
+  const tileLayer = window.L.tileLayer(MAP_TILE_URL, {
+    attribution: MAP_TILE_ATTRIBUTION,
+    maxZoom: 19,
+    detectRetina: false,
+  });
+  tileLayer.once("tileerror", () => {
+    mapTilesUnavailable = true;
+    if (!mapSummary.textContent.includes("Base-map tiles unavailable")) {
+      mapSummary.textContent += " · Base-map tiles unavailable";
+    }
+  });
+  tileLayer.addTo(reportMap);
+
+  reportMarkerLayer = createReportMarkerLayer();
+  reportMarkerLayer.addTo(reportMap);
+  return true;
+}
+
+function mapSummaryText(stationCount, reportCount, missingReportCount) {
+  const stationLabel = `${stationCount.toLocaleString("en-US")} mapped station${stationCount === 1 ? "" : "s"}`;
+  const reportLabel = `${reportCount.toLocaleString("en-US")} located report${reportCount === 1 ? "" : "s"}`;
+  const missingLabel = missingReportCount
+    ? ` · ${missingReportCount.toLocaleString("en-US")} report${missingReportCount === 1 ? "" : "s"} without a usable station grid`
+    : "";
+  const tileLabel = mapTilesUnavailable ? " · Base-map tiles unavailable" : "";
+  return `${stationLabel} from ${reportLabel}${missingLabel}${tileLabel}`;
+}
+
+function renderReportMap(visibleReports) {
+  const { stations, missingReportCount } = groupedMapStations(visibleReports);
+  const locatedReportCount = stations.reduce(
+    (total, station) => total + station.reportCount,
+    0,
+  );
+  mapSummary.textContent = mapSummaryText(
+    stations.length,
+    locatedReportCount,
+    missingReportCount,
+  );
+
+  if (stations.length === 0) {
+    reportMapElement.hidden = true;
+    mapEmpty.hidden = false;
+    mapEmpty.textContent = visibleReports.length
+      ? "None of the filtered reports includes a usable locator for the other station."
+      : "No filtered reports are available to map.";
+    return;
+  }
+
+  mapEmpty.hidden = true;
+  reportMapElement.hidden = false;
+  if (!ensureReportMap()) {
+    reportMapElement.hidden = true;
+    mapEmpty.hidden = false;
+    mapEmpty.textContent = "The local Leaflet map library could not be loaded.";
+    return;
+  }
+
+  prepareReportMarkerLayer();
+  const bounds = [];
+  const markers = [];
+  const individualPositions = mapMarkerMode === "individual"
+    ? individualStationPositions(stations)
+    : null;
+  for (const station of stations) {
+    const report = station.report;
+    const center = [report.qso_latitude, report.qso_longitude];
+    const position = individualPositions?.get(station) || center;
+    const description = `${report.qso_call} in ${report.qso_locator}; ${MAP_OPPORTUNITY_LABEL[station.state]}; open station inspector`;
+    const marker = window.L.marker(position, {
+      alt: description,
+      icon: stationMarkerIcon(station.state),
+      keyboard: true,
+      riseOnHover: true,
+      stationOpportunity: station.state,
+      title: description,
+      zIndexOffset: mapMarkerMode === "individual"
+        ? MAP_OPPORTUNITY_RANK[station.state] * 10_000
+        : 0,
+    });
+    marker.bindTooltip(markerTooltip(station), {
+      direction: "top",
+      offset: [0, -12],
+      opacity: 1,
+    });
+    marker.on("click", () => void openStationInspector(report));
+    marker.on("add", () => {
+      const markerElement = marker.getElement();
+      if (markerElement) {
+        markerElement.setAttribute("aria-label", description);
+        markerElement.setAttribute("role", "button");
+      }
+    });
+    markers.push(marker);
+    bounds.push(center);
+  }
+  if (typeof reportMarkerLayer.addLayers === "function") {
+    reportMarkerLayer.addLayers(markers);
+  } else {
+    for (const marker of markers) reportMarkerLayer.addLayer(marker);
+  }
+
+  window.requestAnimationFrame(() => {
+    reportMap.invalidateSize();
+    if (!mapNeedsInitialFit) return;
+    if (bounds.length === 1) {
+      reportMap.setView(bounds[0], 7);
+    } else {
+      reportMap.fitBounds(bounds, { maxZoom: 8, padding: [34, 34] });
+    }
+    mapNeedsInitialFit = false;
+  });
+}
+
+function updateMapMarkerModeControls() {
+  const isClustered = mapMarkerMode === "clustered";
+  clusteredMapButton.classList.toggle("active", isClustered);
+  individualMapButton.classList.toggle("active", !isClustered);
+  clusteredMapButton.setAttribute("aria-pressed", String(isClustered));
+  individualMapButton.setAttribute("aria-pressed", String(!isClustered));
+}
+
+function setMapMarkerMode(mode, { persist = true } = {}) {
+  if (!["clustered", "individual"].includes(mode) || mode === mapMarkerMode) return;
+  mapMarkerMode = mode;
+  updateMapMarkerModeControls();
+  if (persist) {
+    try {
+      window.localStorage.setItem(MAP_MARKER_MODE_STORAGE_KEY, mode);
+    } catch {
+      // The mode still applies for this page when browser storage is unavailable.
+    }
+  }
+  if (activeResultsView === "map" && reports.length > 0) {
+    renderReportMap(sortedFilteredReports());
+  }
+}
+
+function restoreMapMarkerMode() {
+  try {
+    const savedMode = window.localStorage.getItem(MAP_MARKER_MODE_STORAGE_KEY);
+    if (["clustered", "individual"].includes(savedMode)) mapMarkerMode = savedMode;
+  } catch {
+    // Clustered remains the default when browser storage is unavailable.
+  }
+  updateMapMarkerModeControls();
+}
+
+function updateResultsViewControls() {
+  const hasReports = reports.length > 0;
+  if (!hasReports) activeResultsView = "table";
+  tableViewButton.classList.toggle("active", activeResultsView === "table");
+  mapViewButton.classList.toggle("active", activeResultsView === "map");
+  tableViewButton.setAttribute("aria-pressed", String(activeResultsView === "table"));
+  mapViewButton.setAttribute("aria-pressed", String(activeResultsView === "map"));
+  mapViewButton.disabled = !hasReports;
+}
+
+function setResultsView(view) {
+  if (!["table", "map"].includes(view)) return;
+  if (view === "map" && reports.length === 0) return;
+  activeResultsView = view;
+  renderReports();
 }
 
 function inspectorDetail(label, value) {
@@ -738,6 +1151,7 @@ function updateSortControls() {
     "aria-label",
     `${activeColumn.label} is sorted ${sortState.direction}; activate to sort ${nextDirection}`,
   );
+  updateResultsOptionsSummary();
 }
 
 function setReportSort(key, direction) {
@@ -758,6 +1172,7 @@ function renderReports() {
   reportRows.replaceChildren();
   const visibleReports = sortedFilteredReports();
   updateSortControls();
+  updateResultsViewControls();
 
   for (const report of visibleReports) {
     const row = document.createElement("tr");
@@ -808,10 +1223,13 @@ function renderReports() {
   resultCount.textContent = `${visibleReports.length} of ${reports.length} report${reports.length === 1 ? "" : "s"}`;
   if (visibleReports.length === 0) {
     tableWrap.hidden = true;
+    mapWrap.hidden = true;
     setStatus("No reports match the selected band and mode filters.", "empty");
   } else {
-    tableWrap.hidden = false;
     statusMessage.hidden = true;
+    tableWrap.hidden = activeResultsView !== "table";
+    mapWrap.hidden = activeResultsView !== "map";
+    if (activeResultsView === "map") renderReportMap(visibleReports);
   }
 }
 
@@ -838,6 +1256,7 @@ function configureFilters() {
   populateSelect(bandFilter, bands, "All bands");
   populateSelect(modeFilter, modes, "All modes");
   filterBar.hidden = reports.length === 0;
+  updateResultsOptionsSummary();
 }
 
 async function fetchReports({ automatic = false } = {}) {
@@ -848,7 +1267,9 @@ async function fetchReports({ automatic = false } = {}) {
     return;
   }
 
+  const hasCurrentResults = reports.length > 0;
   fetchInProgress = true;
+  resultsPanel.setAttribute("aria-busy", "true");
   if (refreshTimer !== null) {
     window.clearTimeout(refreshTimer);
     refreshTimer = null;
@@ -884,10 +1305,13 @@ async function fetchReports({ automatic = false } = {}) {
 
   fetchButton.disabled = true;
   fetchButton.querySelector("span").textContent = "Fetching…";
-  tableWrap.hidden = true;
-  filterBar.hidden = true;
-  fetchMeta.hidden = true;
-  setStatus("Contacting PSK Reporter…");
+  if (!hasCurrentResults) {
+    tableWrap.hidden = true;
+    mapWrap.hidden = true;
+    filterBar.hidden = true;
+    fetchMeta.hidden = true;
+    setStatus("Contacting PSK Reporter…");
+  }
   startXmlTrace();
 
   let traceRendered = false;
@@ -900,6 +1324,13 @@ async function fetchReports({ automatic = false } = {}) {
     traceRendered = true;
     if (!response.ok) {
       throw new Error(payload.message || "The report request failed.");
+    }
+
+    if (!queryPanelHasAutoCollapsed) {
+      const focusWasInsideQueryPanel = stationQueryPanel.contains(document.activeElement);
+      stationQueryPanel.open = false;
+      queryPanelHasAutoCollapsed = true;
+      if (!automatic && focusWasInsideQueryPanel) stationQuerySummary.focus();
     }
 
     const refreshedAtUtc = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -919,7 +1350,11 @@ async function fetchReports({ automatic = false } = {}) {
     fetchMeta.hidden = false;
 
     if (payload.status === "empty") {
+      configureFilters();
+      updateResultsViewControls();
       resultCount.textContent = "0 reports";
+      tableWrap.hidden = true;
+      mapWrap.hidden = true;
       setStatus("No reception reports were found for the selected direction and report interval.", "empty");
       return;
     }
@@ -933,14 +1368,20 @@ async function fetchReports({ automatic = false } = {}) {
       setStatus(`${payload.warnings.join(" ")}${oldest}`, "warning");
     }
   } catch (error) {
-    reports = [];
     if (!traceRendered) {
       renderXmlTrace([], error.message || "Unable to capture the upstream trace.");
     }
-    setStatus(error.message || "Unable to load reports.", "error");
+    const message = error.message || "Unable to load reports.";
+    setStatus(
+      hasCurrentResults
+        ? `Refresh failed; continuing to show the previous results. ${message}`
+        : message,
+      "error",
+    );
   } finally {
     setLookbackSelection(selectedLookback);
     fetchInProgress = false;
+    resultsPanel.removeAttribute("aria-busy");
     fetchButton.disabled = false;
     fetchButton.querySelector("span").textContent = "Fetch reports";
     scheduleAutoRefresh();
@@ -958,13 +1399,25 @@ form.addEventListener("submit", (event) => {
   event.preventDefault();
   void fetchReports();
 });
+form.addEventListener("input", updateStationQuerySummary);
+form.addEventListener("change", updateStationQuerySummary);
 fetchButton.addEventListener("click", () => void fetchReports());
 lookbackSelect.addEventListener("change", rememberLookbackPreference);
 refreshIntervalSelect.addEventListener("change", rememberRefreshPreference);
 sentBy.addEventListener("change", () => keepOneDirectionSelected(sentBy));
 recvBy.addEventListener("change", () => keepOneDirectionSelected(recvBy));
-bandFilter.addEventListener("change", renderReports);
-modeFilter.addEventListener("change", renderReports);
+bandFilter.addEventListener("change", () => {
+  updateResultsOptionsSummary();
+  renderReports();
+});
+modeFilter.addEventListener("change", () => {
+  updateResultsOptionsSummary();
+  renderReports();
+});
+tableViewButton.addEventListener("click", () => setResultsView("table"));
+mapViewButton.addEventListener("click", () => setResultsView("map"));
+clusteredMapButton.addEventListener("click", () => setMapMarkerMode("clustered"));
+individualMapButton.addEventListener("click", () => setMapMarkerMode("individual"));
 for (const header of sortHeaders) {
   header.querySelector("button").addEventListener("click", () => {
     toggleReportSort(header.dataset.sortKey);
@@ -992,8 +1445,12 @@ toggleAllQsosButton.addEventListener("click", () => {
 });
 
 updateSortControls();
+updateResultsViewControls();
+restoreMapMarkerMode();
 restoreLookbackPreference();
 restoreRefreshPreference();
+updateStationQuerySummary();
+updateResultsOptionsSummary();
 loadCallsignHistory();
 void loadAppConfig();
 void loadAdifStatus();

@@ -25,7 +25,7 @@ dev = [
 include = ["pskreporter_local*"]
 
 [tool.setuptools.package-data]
-pskreporter_local = ["static/*"]
+pskreporter_local = ["static/*", "static/vendor/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

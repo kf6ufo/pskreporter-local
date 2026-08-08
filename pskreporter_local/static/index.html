@@ -6,22 +6,35 @@
     <meta name="color-scheme" content="dark">
     <title>PSK Reporter + ADIF</title>
     <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/assets/styles.css?v=0.4.9">
-    <script src="/assets/app.js?v=0.4.9" defer></script>
+    <link rel="stylesheet" href="/assets/vendor/leaflet-1.9.4.css">
+    <link rel="stylesheet" href="/assets/vendor/MarkerCluster-1.4.1.css">
+    <link rel="stylesheet" href="/assets/styles.css?v=0.5.2">
+    <script src="/assets/vendor/leaflet-1.9.4.js" defer></script>
+    <script src="/assets/vendor/leaflet.markercluster-1.4.1.js" defer></script>
+    <script src="/assets/app.js?v=0.5.2" defer></script>
   </head>
   <body>
     <main class="page-shell">
-      <header class="hero">
-        <div>
-          <p class="eyebrow">SEE WHO’S ON THE AIR · FIND NEW CONTACTS</p>
-          <h1>PSK Reporter + ADIF</h1>
-        </div>
-        <div class="signal-mark" aria-hidden="true">
-          <span></span><span></span><span></span>
-        </div>
-      </header>
+      <details id="station-query-panel" class="station-query-panel" open>
+        <summary class="station-query-summary">
+          <span class="station-query-label">
+            <strong>PSK Reporter + ADIF</strong>
+            <span>Station &amp; Query</span>
+          </span>
+          <span id="station-query-summary-context" class="disclosure-context">Enter a callsign · Both directions · 15 min · Auto 10 min</span>
+        </summary>
+        <div class="station-query-content">
+          <header class="hero">
+            <div>
+              <p class="eyebrow">SEE WHO’S ON THE AIR · FIND NEW CONTACTS</p>
+              <h1>PSK Reporter + ADIF</h1>
+            </div>
+            <div class="signal-mark" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+          </header>
 
-      <section class="control-panel" aria-labelledby="query-heading">
+          <section class="control-panel" aria-labelledby="query-heading">
         <h2 id="query-heading" class="visually-hidden">Reception report query</h2>
         <div class="query-service-status">
           <span>Requests are cached for at least five minutes.</span>
@@ -192,11 +205,19 @@
             </div>
           </details>
         </form>
-      </section>
+          </section>
+        </div>
+      </details>
 
       <section class="results-panel" aria-labelledby="results-heading">
         <div class="section-heading results-heading">
-          <h2 id="results-heading" class="results-title">Results</h2>
+          <div class="results-heading-primary">
+            <h2 id="results-heading" class="results-title">Results</h2>
+            <div class="results-view-toggle" role="group" aria-label="Results view">
+              <button id="table-view-button" class="results-view-button active" type="button" aria-pressed="true">Table</button>
+              <button id="map-view-button" class="results-view-button" type="button" aria-pressed="false" disabled>Map</button>
+            </div>
+          </div>
           <div id="fetch-meta" class="fetch-meta" hidden>
             <span id="result-count"></span>
             <span class="dot" aria-hidden="true"></span>
@@ -207,49 +228,57 @@
           </div>
         </div>
 
-        <details id="xml-trace" class="trace-panel">
-          <summary>
-            <span>XML request trace</span>
-            <span id="trace-summary" class="trace-summary">Idle</span>
+        <details id="results-options-panel" class="results-options-panel">
+          <summary class="results-options-summary">
+            <span>Filters &amp; Request Details</span>
+            <span id="results-options-summary-context" class="disclosure-context">All bands · All modes</span>
           </summary>
-          <div id="trace-content" class="trace-content">
-            Press Fetch reports to inspect the upstream request and XML response.
+          <div class="results-options-content">
+            <div id="filter-bar" class="filter-bar" hidden>
+              <label>
+                <span>Band</span>
+                <select id="band-filter"><option value="">All bands</option></select>
+              </label>
+              <label>
+                <span>Mode</span>
+                <select id="mode-filter"><option value="">All modes</option></select>
+              </label>
+              <label class="mobile-sort-control">
+                <span>Sort by</span>
+                <select id="sort-field">
+                  <option value="spot_time_utc">Report time (UTC)</option>
+                  <option value="direction">Direction</option>
+                  <option value="sender_call">Sender</option>
+                  <option value="sender_locator">Sender grid</option>
+                  <option value="receiver_call">Recv</option>
+                  <option value="receiver_locator">Recv grid</option>
+                  <option value="qso_counts">QSOs B/T</option>
+                  <option value="sender_region">Sender region</option>
+                  <option value="sender_dxcc">Sender DXCC</option>
+                  <option value="band">Band</option>
+                  <option value="snr_db">sNR (dB)</option>
+                  <option value="mode">Mode</option>
+                  <option value="frequency_hz">F (MHz)</option>
+                </select>
+              </label>
+              <button
+                id="sort-direction"
+                class="mobile-sort-control sort-direction-button"
+                type="button"
+              >Descending ↓</button>
+            </div>
+
+            <details id="xml-trace" class="trace-panel">
+              <summary>
+                <span>XML request trace</span>
+                <span id="trace-summary" class="trace-summary">Idle</span>
+              </summary>
+              <div id="trace-content" class="trace-content">
+                Press Fetch reports to inspect the upstream request and XML response.
+              </div>
+            </details>
           </div>
         </details>
-
-        <div id="filter-bar" class="filter-bar" hidden>
-          <label>
-            <span>Band</span>
-            <select id="band-filter"><option value="">All bands</option></select>
-          </label>
-          <label>
-            <span>Mode</span>
-            <select id="mode-filter"><option value="">All modes</option></select>
-          </label>
-          <label class="mobile-sort-control">
-            <span>Sort by</span>
-            <select id="sort-field">
-              <option value="spot_time_utc">Report time (UTC)</option>
-              <option value="direction">Direction</option>
-              <option value="sender_call">Sender</option>
-              <option value="sender_locator">Sender grid</option>
-              <option value="receiver_call">Recv</option>
-              <option value="receiver_locator">Recv grid</option>
-              <option value="qso_counts">QSOs B/T</option>
-              <option value="sender_region">Sender region</option>
-              <option value="sender_dxcc">Sender DXCC</option>
-              <option value="band">Band</option>
-              <option value="snr_db">sNR (dB)</option>
-              <option value="mode">Mode</option>
-              <option value="frequency_hz">F (MHz)</option>
-            </select>
-          </label>
-          <button
-            id="sort-direction"
-            class="mobile-sort-control sort-direction-button"
-            type="button"
-          >Descending ↓</button>
-        </div>
 
         <div id="status-message" class="status-message" role="status" aria-live="polite">
           Enter your callsign to retrieve recent reports.
@@ -279,6 +308,26 @@
             </thead>
             <tbody id="report-rows"></tbody>
           </table>
+        </div>
+
+        <div id="map-wrap" class="map-wrap" hidden>
+          <div class="map-status-bar">
+            <span id="map-summary">No stations mapped.</span>
+            <div class="map-status-actions">
+              <div class="map-marker-mode" role="group" aria-label="Map marker display">
+                <button id="clustered-map-button" class="map-marker-mode-button active" type="button" aria-pressed="true">Clustered</button>
+                <button id="individual-map-button" class="map-marker-mode-button" type="button" aria-pressed="false">Individual</button>
+              </div>
+              <div class="map-legend" aria-label="Map marker legend">
+                <span><i class="map-legend-dot unworked" aria-hidden="true"></i>Unworked</span>
+                <span><i class="map-legend-dot other-band" aria-hidden="true"></i>New band</span>
+                <span><i class="map-legend-dot worked" aria-hidden="true"></i>Worked</span>
+                <span><i class="map-legend-dot unknown" aria-hidden="true"></i>Log unavailable</span>
+              </div>
+            </div>
+          </div>
+          <div id="report-map" class="report-map" role="region" aria-label="Map of stations in the filtered results"></div>
+          <div id="map-empty" class="map-empty" role="status" hidden></div>
         </div>
       </section>
 
