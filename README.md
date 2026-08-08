@@ -21,6 +21,12 @@ The **QSOs B/T** column compares each station with your log using `band/total` c
 
 This is particularly useful during short openings on bands such as 6 and 10 meters: a `0/0` or `0/n` station in the live reports is an immediate visual cue that there may be a new callsign or band contact available now.
 
+## Station Inspector
+
+Click or tap a **QSOs B/T** count to open the Station Inspector. It keeps the live report context together with the station's individual contacts from your local ADIF log, and provides direct callsign copy and QRZ controls.
+
+![Station Inspector with live report details and local QSO history](docs/images/pskreporter-station-inspector.png)
+
 ## Features
 
 - Query the last 15, 30, or 60 minutes, with 15 minutes as the default.
